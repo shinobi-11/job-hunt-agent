@@ -1,0 +1,11 @@
+{
+  "enabledPlugins": {
+    "designer-skills@Owl-Listener": true
+  },
+  "extraKnownMarketplaces": {
+    "owl-listener-marketplace": {
+      "source": "github",
+      "repo": "Owl-Listener/designer-skills"
+    }
+  }
+}

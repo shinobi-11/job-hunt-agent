@@ -1,0 +1,68 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Data
+data/
+*.db
+*.sqlite
+*.sqlite3
+resume.pdf
+resume.docx
+profile.json
+
+# Logs
+*.log
+
+# Session memory
+.shinobi_mem
+.session_log
+
+# Backups
+backups/
+
+# Firebase secrets — NEVER commit
+data/firebase-admin.json
+firebase-admin.json
+*-firebase-adminsdk-*.json
+
+# Memory log (local only)
+.shinobi_mem

@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard · Job Hunt Agent</title>
+  <link rel="stylesheet" href="/static/liquid.css" />
+</head>
+<body class="lg-body">
+
+  <div id="splash" class="lg-splash">
+    <div class="lg-splash-logo">🎯</div>
+    <div class="lg-splash-title">Job Hunt Agent</div>
+    <div class="lg-splash-loading">
+      <span class="lg-splash-dot"></span><span class="lg-splash-dot"></span><span class="lg-splash-dot"></span>
+    </div>
+  </div>
+
+  <div class="lg-blobs dashboard">
+    <div class="lg-blob b1"></div>
+    <div class="lg-blob b2"></div>
+    <div class="lg-blob b3"></div>
+    <div class="lg-blob b4"></div>
+  </div>
+
+  <script>
+    window.addEventListener("load", () => {
+      setTimeout(() => document.getElementById("splash")?.classList.add("hidden"), 600);
+    });
+  </script>
+
+  <!-- Sidebar -->
+  <aside class="lg-sidebar">
+    <div class="brand" title="Job Hunt Agent">🎯</div>
+    <button class="nav-item active" data-tab="dashboard" title="Dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+    </button>
+    <button class="nav-item" data-tab="profile" title="Profile">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
+    </button>
+    <button class="nav-item" data-tab="applications" title="Applications">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+    </button>
+    <button class="nav-item" data-tab="settings" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </aside>
+
+  <main class="lg-page">
+    <!-- Top bar -->
+    <header class="lg-topbar">
+      <div class="lg-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" placeholder="Search jobs, companies, or applications…" />
+      </div>
+      <div class="lg-topbar-right">
+        <span id="statusBadge" class="lg-pill gray">IDLE</span>
+        <button class="lg-icon-btn" title="Notifications">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        </button>
+        <div class="lg-avatar" id="userAvatar">U</div>
+        <button class="lg-btn small" id="btnLogout">Log out</button>
+      </div>
+    </header>
+
+    <!-- Tab nav -->
+    <div class="lg-tabs">
+      <button class="lg-tab active" data-panel="dashboard">Dashboard</button>
+      <button class="lg-tab" data-panel="profile">Profile</button>
+      <button class="lg-tab" data-panel="applications">Applications</button>
+      <button class="lg-tab" data-panel="settings">Settings</button>
+    </div>
+
+    <!-- DASHBOARD PANEL -->
+    <section id="panel-dashboard" class="lg-panel">
+      <!-- Stat cards -->
+      <div class="lg-grid cols-4">
+        <div class="lg-card lg-stat lg-glow">
+          <div class="lg-stat-label">Jobs Found</div>
+          <div class="lg-stat-value" id="statJobs">0</div>
+          <svg id="sparkJobs" class="lg-spark" viewBox="0 0 100 30" preserveAspectRatio="none" style="width:100%;height:24px;margin-top:4px"></svg>
+        </div>
+        <div class="lg-card lg-stat lg-glow">
+          <div class="lg-stat-label">Auto-Applied</div>
+          <div class="lg-stat-value" id="statApplied" style="color:#16a34a">0</div>
+          <span class="lg-stat-delta up">▲ live</span>
+        </div>
+        <div class="lg-card lg-stat lg-glow">
+          <div class="lg-stat-label">Pending Review</div>
+          <div class="lg-stat-value" id="statSemi" style="color:#ea580c">0</div>
+          <span class="lg-stat-delta">queue</span>
+        </div>
+        <div class="lg-card lg-stat lg-glow">
+          <div class="lg-stat-label">Auto-Apply Rate</div>
+          <div class="lg-stat-value" id="statRate">0%</div>
+          <span class="lg-stat-delta" id="elapsedTime" style="color:var(--lg-text-dim)">00:00</span>
+        </div>
+      </div>
+
+      <!-- Controls + Progress ring -->
+      <div class="lg-grid cols-3" style="margin-top:18px">
+        <div class="lg-card" style="padding:24px; grid-column: span 2;">
+          <h3 style="margin:0 0 14px;font-size:16px;font-weight:700;color:var(--lg-text)">Search Controls</h3>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--lg-text-2)">
+              Duration (min)
+              <input id="durationInput" class="lg-input" type="number" min="1" max="480" value="30" style="width:90px"/>
+            </label>
+            <button class="lg-btn primary" id="btnStart">▶ Start Search</button>
+            <button class="lg-btn" id="btnPause" disabled>⏸ Pause</button>
+            <button class="lg-btn" id="btnResume" disabled>▶ Resume</button>
+            <button class="lg-btn danger" id="btnStop" disabled>⏹ Stop</button>
+          </div>
+          <div id="diagBox" style="margin-top:18px;font-size:12px;color:var(--lg-text-dim);" hidden></div>
+        </div>
+        <div class="lg-card" style="padding:24px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px">
+          <div class="lg-progress-ring" id="progressRing">
+            <svg width="120" height="120" viewBox="0 0 120 120">
+              <defs>
+                <linearGradient id="lgRingGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#3b82f6"/>
+                  <stop offset="100%" stop-color="#8b5cf6"/>
+                </linearGradient>
+              </defs>
+              <circle class="ring-bg" cx="60" cy="60" r="50"/>
+              <circle id="ringFg" class="ring-fg" cx="60" cy="60" r="50"
+                      stroke-dasharray="314.16" stroke-dashoffset="314.16"/>
+            </svg>
+            <div class="ring-text" id="ringText">0%</div>
+          </div>
+          <div style="font-size:12px;color:var(--lg-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:0.06em">
+            Apply Rate
+          </div>
+        </div>
+      </div>
+
+      <!-- Live feed -->
+      <div class="lg-card" style="padding:24px;margin-top:18px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <h3 style="margin:0;font-size:16px;font-weight:700;color:var(--lg-text)">Live Feed (high-match jobs only)</h3>
+          <span style="font-size:12px;color:var(--lg-text-dim)">Score &gt; 50 · auto-refresh</span>
+        </div>
+        <div id="feedList" style="max-height:520px;overflow-y:auto;padding-right:4px">
+          <div class="lg-job" style="border-left-color:#cbd5e1">
+            <div style="color:var(--lg-text-dim);text-align:center;padding:20px">
+              No high-match jobs yet. Hit "Start Search" above to begin.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PROFILE PANEL -->
+    <section id="panel-profile" class="lg-panel" hidden>
+      <div class="lg-card lg-glow" style="padding:32px">
+        <h2 style="margin:0 0 6px;font-size:22px;font-weight:800;color:var(--lg-text)">Your Profile</h2>
+        <p style="margin:0 0 24px;color:var(--lg-text-dim);font-size:14px">Edit anything in Settings.</p>
+        <div id="profileView">
+          <p style="color:var(--lg-text-dim)">Loading…</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- APPLICATIONS PANEL -->
+    <section id="panel-applications" class="lg-panel" hidden>
+      <div class="lg-card" style="padding:24px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:12px">
+          <h2 style="margin:0;font-size:20px;font-weight:800;color:var(--lg-text)">Applications</h2>
+          <div class="lg-tabs" style="margin:0">
+            <button class="lg-tab sub-btn active" data-status="all">All</button>
+            <button class="lg-tab sub-btn" data-status="auto_applied">Applied</button>
+            <button class="lg-tab sub-btn" data-status="pending">Pending</button>
+            <button class="lg-tab sub-btn" data-status="manual_flag">Manual</button>
+          </div>
+        </div>
+        <div id="appsList"></div>
+      </div>
+    </section>
+
+    <!-- SETTINGS PANEL -->
+    <section id="panel-settings" class="lg-panel" hidden>
+      <div class="lg-card lg-glow" style="padding:32px">
+        <h2 style="margin:0 0 6px;font-size:22px;font-weight:800;color:var(--lg-text)">Profile Settings</h2>
+        <p style="margin:0 0 24px;color:var(--lg-text-dim);font-size:14px">All changes save to your account.</p>
+
+        <form id="profileForm">
+          <div class="lg-grid cols-2">
+            <div><label class="lg-label">Name</label><input class="lg-input" name="name" required/></div>
+            <div><label class="lg-label">Email</label><input class="lg-input" name="email" type="email" required/></div>
+            <div><label class="lg-label">Current Role</label><input class="lg-input" name="current_role"/></div>
+            <div><label class="lg-label">Years of Experience</label><input class="lg-input" name="years_experience" type="number" min="0" max="60"/></div>
+          </div>
+
+          <div style="margin-top:14px">
+            <label class="lg-label">Desired Jobs (comma-separated)</label>
+            <input class="lg-input" name="desired_roles" required placeholder="Financial Analyst, Investment Associate"/>
+          </div>
+
+          <div style="margin-top:14px">
+            <label class="lg-label">Desired Locations (comma-separated)</label>
+            <input class="lg-input" name="preferred_locations" required placeholder="Bangalore, Gurugram, Remote"/>
+          </div>
+
+          <div style="margin-top:14px">
+            <label class="lg-label">Skills (comma-separated)</label>
+            <input class="lg-input" name="skills" placeholder="Power BI, DCF Valuation, Excel"/>
+          </div>
+
+          <div class="lg-grid cols-3" style="margin-top:14px">
+            <div>
+              <label class="lg-label">Remote Preference</label>
+              <select class="lg-select" name="remote_preference">
+                <option value="any">Any</option><option value="remote">Remote</option>
+                <option value="hybrid">Hybrid</option><option value="on-site">On-site</option>
+              </select>
+            </div>
+            <div>
+              <label class="lg-label">Currency</label>
+              <select class="lg-select" name="salary_currency">
+                <option>USD</option><option>INR</option><option>EUR</option><option>GBP</option>
+              </select>
+            </div>
+            <div>
+              <label class="lg-label">Current Annual Salary</label>
+              <input class="lg-input" name="current_salary" type="number" min="0" required/>
+            </div>
+          </div>
+
+          <div class="lg-grid cols-2" style="margin-top:14px">
+            <div>
+              <label class="lg-label">Min Expected Hike %</label>
+              <input class="lg-input" name="hike_percent_min" type="number" min="0" max="200" value="20" required/>
+            </div>
+            <div>
+              <label class="lg-label">Max Expected Hike %</label>
+              <input class="lg-input" name="hike_percent_max" type="number" min="0" max="500" value="40" required/>
+            </div>
+          </div>
+
+          <div id="salaryPreview" hidden style="margin-top:14px;padding:14px 18px;border-radius:12px;
+               background:rgba(34,197,94,0.1);border-left:3px solid #16a34a;font-size:14px;color:var(--lg-text-2)">
+            <strong>Expected Salary Range:</strong> <span id="salaryRangeText"></span>
+          </div>
+
+          <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:18px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--lg-text-2)">
+              <input type="checkbox" name="willing_to_relocate"/> Willing to relocate
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--lg-text-2)">
+              <input type="checkbox" name="auto_apply_enabled" checked/> Auto-apply (≥85)
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--lg-text-2)">
+              <input type="checkbox" name="strict_salary_filter" checked/> Strict salary filter
+            </label>
+          </div>
+
+          <fieldset style="margin-top:22px;padding:18px 22px;border-radius:14px;border:1px solid rgba(139,92,246,0.25);background:rgba(139,92,246,0.05)">
+            <legend style="padding:2px 10px;font-weight:700;font-size:13px;color:#7c3aed">🤖 AI Provider</legend>
+            <p style="margin:6px 0 14px;font-size:12px;color:var(--lg-text-dim)">Pick any LLM provider — switch keys anytime to dodge rate limits.</p>
+            <div class="lg-grid cols-2">
+              <div>
+                <label class="lg-label">Provider</label>
+                <select class="lg-select" name="llm_provider" id="providerSelect">
+                  <option value="gemini">Google Gemini</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic Claude</option>
+                  <option value="grok">xAI Grok</option>
+                </select>
+              </div>
+              <div>
+                <label class="lg-label">API Key</label>
+                <input class="lg-input" name="llm_api_key" type="password" autocomplete="off" id="apiKeyInput" placeholder="Paste your key"/>
+              </div>
+            </div>
+            <p id="providerHint" style="margin-top:10px;font-size:12px;color:var(--lg-text-dim)"></p>
+          </fieldset>
+
+          <div style="display:flex;justify-content:flex-end;margin-top:18px">
+            <button type="submit" class="lg-btn primary big">💾 Save Profile</button>
+          </div>
+        </form>
+
+        <hr style="margin:32px 0;border:none;border-top:1px solid rgba(15,23,42,0.08)"/>
+
+        <h3 style="margin:0 0 12px;font-size:18px;font-weight:700;color:var(--lg-text)">Resume</h3>
+        <div id="resumeInfo" style="padding:14px 18px;background:rgba(255,255,255,0.4);border-radius:10px;margin-bottom:14px;font-size:14px;color:var(--lg-text-2)">
+          <span style="color:var(--lg-text-dim)">No resume uploaded yet.</span>
+        </div>
+        <form id="resumeForm" enctype="multipart/form-data" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <input class="lg-input" type="file" name="file" accept=".pdf,.docx,.doc" required style="flex:1;padding:8px"/>
+          <button type="submit" class="lg-btn primary">📄 Upload Resume</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

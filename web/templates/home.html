@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Job Hunt Agent — AI-powered job application automation</title>
+  <link rel="stylesheet" href="/static/liquid.css" />
+</head>
+<body class="lg-body">
+
+  <div id="splash" class="lg-splash">
+    <div class="lg-splash-logo">🎯</div>
+    <div class="lg-splash-title">Job Hunt Agent</div>
+    <div class="lg-splash-loading">
+      <span class="lg-splash-dot"></span>
+      <span class="lg-splash-dot"></span>
+      <span class="lg-splash-dot"></span>
+    </div>
+  </div>
+
+  <div class="lg-blobs">
+    <div class="lg-blob b1"></div>
+    <div class="lg-blob b2"></div>
+    <div class="lg-blob b3"></div>
+    <div class="lg-blob b4"></div>
+  </div>
+
+  <script>
+    window.addEventListener("load", () => {
+      setTimeout(() => document.getElementById("splash")?.classList.add("hidden"), 400);
+    });
+  </script>
+
+  <nav class="lg-publicnav">
+    <a href="/" class="brand">
+      <span class="brand-logo">🎯</span>
+      <span>Job Hunt Agent</span>
+    </a>
+    <div class="nav-actions">
+      <a href="/login" class="lg-btn">Log in</a>
+      <a href="/signup" class="lg-btn primary">Sign up free</a>
+    </div>
+  </nav>
+
+  <main class="lg-hero">
+    <div class="lg-hero-content lg-glow">
+      <span class="lg-eyebrow">AI-powered · Multi-LLM · Always-on</span>
+      <h1>Your job hunt, on autopilot.</h1>
+      <p>
+        Drop in your resume. Tell us what you're looking for and what you'd accept.
+        We continuously discover real jobs across 8+ platforms, score every one with the LLM you choose
+        (Gemini, Claude, GPT, or Grok), and apply to the best matches automatically.
+      </p>
+      <div class="lg-hero-cta">
+        <a href="/signup" class="lg-btn primary big">Start free →</a>
+        <a href="/login" class="lg-btn big">I already have an account</a>
+      </div>
+      <p style="font-size: 13px; color: var(--lg-text-dim); margin: 0;">
+        Bring your own LLM key · Switch providers anytime · No card required
+      </p>
+    </div>
+  </main>
+
+  <section class="lg-features">
+    <div class="lg-card lg-feature">
+      <div class="icon">🤖</div>
+      <h3>Pluggable AI</h3>
+      <p>Use Gemini, OpenAI GPT, Anthropic Claude, or xAI Grok. Hit a rate limit? Swap keys mid-flight without restarting.</p>
+    </div>
+    <div class="lg-card lg-feature">
+      <div class="icon">💰</div>
+      <h3>Strict salary filter</h3>
+      <p>Tell us your current salary and expected hike range. We compute your target and reject jobs below it before they cost an LLM call.</p>
+    </div>
+    <div class="lg-card lg-feature">
+      <div class="icon">🎯</div>
+      <h3>3-tier routing</h3>
+      <p>Score ≥85 auto-applies. 70–84 queues for your review. Below 70 gets flagged. You stay in control.</p>
+    </div>
+    <div class="lg-card lg-feature">
+      <div class="icon">📡</div>
+      <h3>Live discovery feed</h3>
+      <p>Real-time stream of jobs as they're discovered, scored, and routed — straight to your dashboard.</p>
+    </div>
+  </section>
+
+  <footer style="text-align: center; padding: 40px 32px; opacity: 0.5; font-size: 12px; position: relative; z-index: 1;">
+    <small>Job Hunt Agent v0.2.0 · <a href="/docs" style="color: var(--lg-blue-deep);">API docs</a></small>
+  </footer>
+</body>
+</html>

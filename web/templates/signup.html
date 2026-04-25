@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign up · Job Hunt Agent</title>
+  <link rel="stylesheet" href="/static/liquid.css" />
+</head>
+<body class="lg-body">
+
+  <div id="splash" class="lg-splash">
+    <div class="lg-splash-logo">🎯</div>
+    <div class="lg-splash-title">Job Hunt Agent</div>
+    <div class="lg-splash-loading">
+      <span class="lg-splash-dot"></span><span class="lg-splash-dot"></span><span class="lg-splash-dot"></span>
+    </div>
+  </div>
+
+  <div class="lg-blobs">
+    <div class="lg-blob b1"></div>
+    <div class="lg-blob b2"></div>
+    <div class="lg-blob b3"></div>
+  </div>
+
+  <script>
+    window.addEventListener("load", () => {
+      setTimeout(() => document.getElementById("splash")?.classList.add("hidden"), 400);
+    });
+  </script>
+
+  <nav class="lg-publicnav">
+    <a href="/" class="brand">
+      <span class="brand-logo">🎯</span>
+      <span>Job Hunt Agent</span>
+    </a>
+    <div class="nav-actions">
+      <a href="/login" class="lg-btn">Have an account? Log in</a>
+    </div>
+  </nav>
+
+  <main class="lg-auth-shell">
+    <div class="lg-auth-card lg-glow">
+      <h1>Create your account</h1>
+      <p class="sub">Free. No card. Bring your own LLM key.</p>
+
+      <form id="signupForm">
+        <div>
+          <label class="lg-label" for="su-name">Full name (optional)</label>
+          <input id="su-name" class="lg-input" type="text" name="name" autocomplete="name" />
+        </div>
+        <div>
+          <label class="lg-label" for="su-email">Email</label>
+          <input id="su-email" class="lg-input" type="email" name="email" required autocomplete="email" autofocus />
+        </div>
+        <div>
+          <label class="lg-label" for="su-pw">Password</label>
+          <input id="su-pw" class="lg-input" type="password" name="password" required minlength="8" autocomplete="new-password" />
+          <small style="display:block;margin-top:6px;font-size:11px;color:var(--lg-text-dim)">Minimum 8 characters.</small>
+        </div>
+        <button type="submit" class="lg-btn primary big" style="width:100%; margin-top: 6px;">Create account →</button>
+      </form>
+
+      <p class="alt">Already have one? <a href="/login">Log in</a></p>
+      <div id="authError" class="lg-auth-error" hidden></div>
+    </div>
+  </main>
+
+  <script>
+    document.getElementById("signupForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const errBox = document.getElementById("authError");
+      errBox.hidden = true;
+      const f = e.target;
+      const btn = f.querySelector("button");
+      btn.disabled = true; btn.textContent = "Creating…";
+      try {
+        const r = await fetch("/api/auth/signup", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({email: f.email.value, password: f.password.value, name: f.name.value || ""}),
+        });
+        if (!r.ok) {
+          const err = await r.json();
+          throw new Error(err.detail || "Signup failed");
+        }
+        location.href = "/app";
+      } catch (e) {
+        errBox.textContent = e.message;
+        errBox.hidden = false;
+        btn.disabled = false; btn.textContent = "Create account →";
+      }
+    };
+  </script>
+</body>
+</html>

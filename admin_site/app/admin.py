@@ -2,12 +2,58 @@
 from django.contrib import admin, messages
 from django.utils.html import format_html
 
-from .models import AppUser, Application, Job, MatchScore, Profile
+from .models import AppUser, Application, Job, MatchScore, Profile, Query
 
 
 def _delete_perm(self, request, obj=None):
     """Always allow delete on managed=False models (override Django's restriction)."""
     return True
+
+
+@admin.register(Query)
+class QueryAdmin(admin.ModelAdmin):
+    list_display = ("name", "email", "phone", "status_badge", "message_short", "created_at")
+    list_filter = ("status",)
+    search_fields = ("name", "email", "phone", "message")
+    readonly_fields = ("id", "created_at")
+    list_per_page = 50
+    actions = ["mark_resolved", "mark_in_progress", "mark_spam", "delete_selected"]
+    date_hierarchy = "created_at"
+
+    def has_delete_permission(self, request, obj=None):
+        return True
+
+    @admin.display(description="Status")
+    def status_badge(self, obj):
+        colors = {
+            "new": "#3b82f6", "in_progress": "#ea580c",
+            "resolved": "#16a34a", "spam": "#666",
+        }
+        c = colors.get(obj.status, "#999")
+        return format_html(
+            '<span style="color:{};font-weight:600">● {}</span>',
+            c, (obj.status or "new").replace("_", " ").title(),
+        )
+
+    @admin.display(description="Message")
+    def message_short(self, obj):
+        m = obj.message or ""
+        return m[:80] + ("..." if len(m) > 80 else "")
+
+    @admin.action(description="✓ Mark as Resolved")
+    def mark_resolved(self, request, queryset):
+        n = queryset.update(status="resolved")
+        self.message_user(request, f"Marked {n} query(ies) resolved.")
+
+    @admin.action(description="⏳ Mark as In Progress")
+    def mark_in_progress(self, request, queryset):
+        n = queryset.update(status="in_progress")
+        self.message_user(request, f"Marked {n} query(ies) in progress.")
+
+    @admin.action(description="🚫 Mark as Spam")
+    def mark_spam(self, request, queryset):
+        n = queryset.update(status="spam")
+        self.message_user(request, f"Marked {n} query(ies) as spam.")
 
 
 @admin.register(AppUser)

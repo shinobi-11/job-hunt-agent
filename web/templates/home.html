@@ -37,6 +37,7 @@
       <span>Job Hunt Agent</span>
     </a>
     <div class="nav-actions">
+      <a href="#contact" class="lg-btn">Contact</a>
       <a href="/login" class="lg-btn">Log in</a>
       <a href="/signup" class="lg-btn primary">Sign up free</a>
     </div>
@@ -84,8 +85,94 @@
     </div>
   </section>
 
+  <section id="contact" style="max-width: 720px; margin: 40px auto 80px; padding: 0 24px; position: relative; z-index: 1;">
+    <div class="lg-card lg-glow" style="padding: 40px;">
+      <h2 style="margin: 0 0 8px; font-size: 28px; font-weight: 800;
+                  background: linear-gradient(135deg, #0f172a 0%, #3b82f6 60%, #8b5cf6 100%);
+                  -webkit-background-clip: text; background-clip: text; color: transparent;">
+        Get in touch
+      </h2>
+      <p style="margin: 0 0 24px; color: var(--lg-text-dim); font-size: 14px;">
+        Questions, feedback, or feature requests? Drop us a line.
+      </p>
+
+      <form id="contactForm" style="display: flex; flex-direction: column; gap: 14px;">
+        <div>
+          <label class="lg-label">Name</label>
+          <input class="lg-input" type="text" name="name" required autocomplete="name" />
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div>
+            <label class="lg-label">Email</label>
+            <input class="lg-input" type="email" name="email" required autocomplete="email" />
+          </div>
+          <div>
+            <label class="lg-label">Phone (optional)</label>
+            <input class="lg-input" type="tel" name="phone" autocomplete="tel" placeholder="+91 9999999999" />
+          </div>
+        </div>
+        <div>
+          <label class="lg-label">Your message</label>
+          <textarea class="lg-input" name="message" rows="4" required maxlength="5000"
+                    style="resize: vertical; font-family: inherit;"
+                    placeholder="What's on your mind?"></textarea>
+        </div>
+        <button type="submit" class="lg-btn primary big" style="align-self: flex-end;">
+          Send message →
+        </button>
+      </form>
+
+      <div id="contactResult" hidden style="margin-top: 16px; padding: 14px;
+            background: rgba(34,197,94,0.1); border-left: 3px solid #16a34a;
+            border-radius: 10px; color: #15803d; font-size: 14px;"></div>
+      <div id="contactError" hidden class="lg-auth-error" style="margin-top: 16px;"></div>
+    </div>
+  </section>
+
+  <script>
+    (function() {
+      const form = document.getElementById("contactForm");
+      const result = document.getElementById("contactResult");
+      const errBox = document.getElementById("contactError");
+      if (!form) return;
+
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        result.hidden = true; errBox.hidden = true;
+        const f = e.target;
+        const btn = f.querySelector("button[type='submit']");
+        btn.disabled = true; btn.textContent = "Sending…";
+
+        try {
+          const r = await fetch("/api/contact", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+              name: f.name.value,
+              email: f.email.value,
+              phone: f.phone.value || null,
+              message: f.message.value,
+            }),
+          });
+          if (!r.ok) {
+            const err = await r.json();
+            throw new Error(err.detail || "Submission failed");
+          }
+          result.textContent = "Thanks! Your message has been received. We'll get back to you soon.";
+          result.hidden = false;
+          f.reset();
+        } catch (e) {
+          errBox.textContent = e.message;
+          errBox.hidden = false;
+        } finally {
+          btn.disabled = false; btn.textContent = "Send message →";
+        }
+      };
+    })();
+  </script>
+
   <footer style="text-align: center; padding: 40px 32px; opacity: 0.5; font-size: 12px; position: relative; z-index: 1;">
-    <small>Job Hunt Agent v0.2.0 · <a href="/docs" style="color: var(--lg-blue-deep);">API docs</a></small>
+    <small>Job Hunt Agent v0.2.0 · <a href="/docs" style="color: var(--lg-blue-deep);">API docs</a> · <a href="#contact" style="color: var(--lg-blue-deep);">Contact</a></small>
   </footer>
 </body>
 </html>

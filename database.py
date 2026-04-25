@@ -90,6 +90,15 @@ class JobDatabase:
             autoincrement_pk = "TEXT PRIMARY KEY"
 
         ddl = [
+            f"""CREATE TABLE IF NOT EXISTS queries (
+                id {autoincrement_pk},
+                name {text} NOT NULL,
+                email {text} NOT NULL,
+                phone {text},
+                message {text} NOT NULL,
+                status {text} DEFAULT 'new',
+                created_at {ts}
+            )""",
             f"""CREATE TABLE IF NOT EXISTS jobs (
                 id {autoincrement_pk},
                 title {text} NOT NULL,

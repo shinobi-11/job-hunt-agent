@@ -269,6 +269,47 @@ async def api_logout(response: Response):
     return {"ok": True}
 
 
+class ContactPayload(BaseModel):
+    name: str
+    email: str
+    phone: str | None = None
+    message: str
+
+
+@app.post("/api/contact")
+async def submit_contact(payload: ContactPayload):
+    """Public endpoint — saves contact-form submissions to the queries table."""
+    import re
+    import uuid
+
+    name = (payload.name or "").strip()
+    email = (payload.email or "").strip().lower()
+    message = (payload.message or "").strip()
+
+    if not name or len(name) > 200:
+        raise HTTPException(400, "Name is required (max 200 chars)")
+    if not re.match(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$", email):
+        raise HTTPException(400, "Valid email is required")
+    if not message or len(message) > 5000:
+        raise HTTPException(400, "Message is required (max 5000 chars)")
+
+    qid = f"q_{uuid.uuid4().hex[:16]}"
+    db = _db()
+
+    try:
+        with db._connect() as conn:
+            cur = conn.cursor()
+            ph = "%s" if db.is_postgres else "?"
+            cur.execute(
+                f"INSERT INTO queries (id, name, email, phone, message, status) "
+                f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph})",
+                (qid, name[:200], email[:200], (payload.phone or "")[:50], message[:5000], "new"),
+            )
+        return {"ok": True, "id": qid}
+    except Exception as e:
+        raise HTTPException(500, f"Could not save query: {str(e)[:120]}")
+
+
 @app.get("/api/auth/me")
 async def api_me(user: dict | None = Depends(get_current_user)):
     if not user:

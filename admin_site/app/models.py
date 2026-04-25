@@ -2,6 +2,27 @@
 from django.db import models
 
 
+class Query(models.Model):
+    """Contact form submissions."""
+    id = models.TextField(primary_key=True)
+    name = models.TextField()
+    email = models.TextField()
+    phone = models.TextField(null=True, blank=True)
+    message = models.TextField()
+    status = models.TextField(default="new")
+    created_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = "queries"
+        ordering = ["-created_at"]
+        verbose_name = "Contact Query"
+        verbose_name_plural = "Contact Queries"
+
+    def __str__(self) -> str:
+        return f"{self.name} <{self.email}>"
+
+
 class AppUser(models.Model):
     """Site-level user accounts (separate from Django auth.User)."""
     id = models.TextField(primary_key=True)

@@ -101,6 +101,7 @@ class JobDatabase:
             )""",
             f"""CREATE TABLE IF NOT EXISTS jobs (
                 id {autoincrement_pk},
+                user_id {text},
                 title {text} NOT NULL,
                 company {text} NOT NULL,
                 location {text},
@@ -111,12 +112,13 @@ class JobDatabase:
                 description {text} NOT NULL,
                 requirements {text},
                 source {text} NOT NULL,
-                url {text} UNIQUE NOT NULL,
+                url {text} NOT NULL,
                 posted_date TIMESTAMP,
                 discovered_at {ts}
             )""",
             f"""CREATE TABLE IF NOT EXISTS applications (
                 id {autoincrement_pk},
+                user_id {text},
                 job_id {text} NOT NULL,
                 job_title {text} NOT NULL,
                 company {text} NOT NULL,
@@ -130,6 +132,7 @@ class JobDatabase:
             )""",
             f"""CREATE TABLE IF NOT EXISTS match_scores (
                 id {autoincrement_pk},
+                user_id {text},
                 job_id {text} NOT NULL,
                 score {integer} NOT NULL,
                 reason {text},
@@ -143,8 +146,9 @@ class JobDatabase:
             )""",
             f"""CREATE TABLE IF NOT EXISTS profiles (
                 id {autoincrement_pk},
+                user_id {text} UNIQUE,
                 name {text} NOT NULL,
-                email {text} UNIQUE NOT NULL,
+                email {text} NOT NULL,
                 "current_role" {text},
                 years_experience {integer},
                 desired_roles {text},
@@ -175,11 +179,34 @@ class JobDatabase:
             for stmt in ddl:
                 cur.execute(stmt)
 
-            # Lazy migrations on SQLite (Postgres CREATE handles new cols already)
-            if not self.is_postgres:
+            # Lazy migrations
+            if self.is_postgres:
+                # Postgres: add user_id columns + drop old unique constraints if they exist
+                migrations = [
+                    ("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS user_id TEXT", []),
+                    ("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS user_id TEXT", []),
+                    ("ALTER TABLE applications ADD COLUMN IF NOT EXISTS user_id TEXT", []),
+                    ("ALTER TABLE match_scores ADD COLUMN IF NOT EXISTS user_id TEXT", []),
+                    # Drop the old globally-unique email constraint (different users can have same email field)
+                    ("ALTER TABLE profiles DROP CONSTRAINT IF EXISTS profiles_email_key", []),
+                    # Drop the old globally-unique URL constraint (now (user_id, url) is the dedup key)
+                    ("ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_url_key", []),
+                    # Composite unique on (user_id, url) so each user can have the same job
+                    ("CREATE UNIQUE INDEX IF NOT EXISTS jobs_user_url_uniq ON jobs (user_id, url)", []),
+                    # Unique profile per user
+                    ("CREATE UNIQUE INDEX IF NOT EXISTS profiles_user_uniq ON profiles (user_id)", []),
+                ]
+                for sql, _ in migrations:
+                    try:
+                        cur.execute(sql)
+                    except Exception as e:
+                        # Errors here are usually "constraint doesn't exist" — non-fatal
+                        print(f"Migration note: {sql[:60]}... → {e}")
+            else:
                 cur.execute("PRAGMA table_info(profiles)")
                 existing = {row[1] for row in cur.fetchall()}
                 for col, defn in [
+                    ("user_id", "TEXT"),
                     ("current_salary", "REAL"),
                     ("hike_percent_min", "REAL DEFAULT 20"),
                     ("hike_percent_max", "REAL DEFAULT 40"),
@@ -191,22 +218,27 @@ class JobDatabase:
                 ]:
                     if col not in existing:
                         cur.execute(f"ALTER TABLE profiles ADD COLUMN {col} {defn}")
+                for table in ["jobs", "applications", "match_scores"]:
+                    cur.execute(f"PRAGMA table_info({table})")
+                    cols = {row[1] for row in cur.fetchall()}
+                    if "user_id" not in cols:
+                        cur.execute(f"ALTER TABLE {table} ADD COLUMN user_id TEXT")
 
     # ─── Jobs ────────────────────────────────────────────────────
 
-    def add_job(self, job: Job) -> bool:
+    def add_job(self, job: Job, user_id: str | None = None) -> bool:
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
                 if self.is_postgres:
                     cur.execute("""
                         INSERT INTO jobs
-                        (id, title, company, location, remote, salary_min, salary_max,
+                        (id, user_id, title, company, location, remote, salary_min, salary_max,
                          currency, description, requirements, source, url, posted_date)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (url) DO NOTHING
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT ON CONSTRAINT jobs_user_url_uniq DO NOTHING
                     """, (
-                        job.id, job.title, job.company, job.location, job.remote,
+                        job.id, user_id, job.title, job.company, job.location, job.remote,
                         job.salary_min, job.salary_max, job.currency, job.description,
                         json.dumps(job.requirements), job.source, job.url, job.posted_date,
                     ))
@@ -214,48 +246,60 @@ class JobDatabase:
                 else:
                     cur.execute(self._q("""
                         INSERT OR IGNORE INTO jobs
-                        (id, title, company, location, remote, salary_min, salary_max,
+                        (id, user_id, title, company, location, remote, salary_min, salary_max,
                          currency, description, requirements, source, url, posted_date)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """), (
-                        job.id, job.title, job.company, job.location, job.remote,
+                        job.id, user_id, job.title, job.company, job.location, job.remote,
                         job.salary_min, job.salary_max, job.currency, job.description,
                         json.dumps(job.requirements), job.source, job.url, job.posted_date,
                     ))
                     return cur.rowcount > 0
         except Exception as e:
+            # SQLite doesn't have named constraints, so dedup-on-insert needs the constraint name
+            # Fall back to checking before insert
+            if "jobs_user_url_uniq" in str(e):
+                try:
+                    with self._connect() as conn:
+                        cur = conn.cursor()
+                        cur.execute(self._q("SELECT 1 FROM jobs WHERE user_id = ? AND url = ?"),
+                                    (user_id, job.url))
+                        if cur.fetchone():
+                            return False
+                except Exception:
+                    pass
             print(f"Error adding job: {e}")
             return False
 
     # ─── Applications ────────────────────────────────────────────
 
-    def add_application(self, app: Application) -> bool:
+    def add_application(self, app: Application, user_id: str | None = None) -> bool:
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
                 if self.is_postgres:
                     cur.execute("""
                         INSERT INTO applications
-                        (id, job_id, job_title, company, status, match_score,
+                        (id, user_id, job_id, job_title, company, status, match_score,
                          match_tier, applied_at, applied_by, notes)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (id) DO UPDATE SET
                             status = EXCLUDED.status,
                             applied_at = EXCLUDED.applied_at,
                             applied_by = EXCLUDED.applied_by,
                             notes = EXCLUDED.notes
                     """, (
-                        app.id, app.job_id, app.job_title, app.company, app.status.value,
+                        app.id, user_id, app.job_id, app.job_title, app.company, app.status.value,
                         app.match_score, app.match_tier, app.applied_at, app.applied_by, app.notes,
                     ))
                 else:
                     cur.execute(self._q("""
                         INSERT OR REPLACE INTO applications
-                        (id, job_id, job_title, company, status, match_score,
+                        (id, user_id, job_id, job_title, company, status, match_score,
                          match_tier, applied_at, applied_by, notes)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """), (
-                        app.id, app.job_id, app.job_title, app.company, app.status.value,
+                        app.id, user_id, app.job_id, app.job_title, app.company, app.status.value,
                         app.match_score, app.match_tier, app.applied_at, app.applied_by, app.notes,
                     ))
             return True
@@ -265,32 +309,36 @@ class JobDatabase:
 
     # ─── Match scores ────────────────────────────────────────────
 
-    def add_match_score(self, score: MatchScore) -> bool:
+    def add_match_score(self, score: MatchScore, user_id: str | None = None) -> bool:
         try:
+            # match_scores PK is job_id (one score per job per user) — composite would need
+            # to be (user_id, job_id). For simplicity we use job_id as the PK and trust
+            # caller-supplied job_ids to be globally unique (they include source prefix).
+            mid = f"{user_id or 'global'}_{score.job_id}"
             with self._connect() as conn:
                 cur = conn.cursor()
                 if self.is_postgres:
                     cur.execute("""
                         INSERT INTO match_scores
-                        (id, job_id, score, reason, matched_skills, missing_skills,
+                        (id, user_id, job_id, score, reason, matched_skills, missing_skills,
                          cultural_fit, salary_alignment, tier, confidence)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (id) DO UPDATE SET
                             score = EXCLUDED.score, reason = EXCLUDED.reason,
                             tier = EXCLUDED.tier, confidence = EXCLUDED.confidence
                     """, (
-                        score.job_id, score.job_id, score.score, score.reason,
+                        mid, user_id, score.job_id, score.score, score.reason,
                         json.dumps(score.matched_skills), json.dumps(score.missing_skills),
                         score.cultural_fit, score.salary_alignment, score.tier, score.confidence,
                     ))
                 else:
                     cur.execute(self._q("""
                         INSERT OR REPLACE INTO match_scores
-                        (id, job_id, score, reason, matched_skills, missing_skills,
+                        (id, user_id, job_id, score, reason, matched_skills, missing_skills,
                          cultural_fit, salary_alignment, tier, confidence)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """), (
-                        score.job_id, score.job_id, score.score, score.reason,
+                        mid, user_id, score.job_id, score.score, score.reason,
                         json.dumps(score.matched_skills), json.dumps(score.missing_skills),
                         score.cultural_fit, score.salary_alignment, score.tier, score.confidence,
                     ))
@@ -301,20 +349,25 @@ class JobDatabase:
 
     # ─── Profile ─────────────────────────────────────────────────
 
-    def save_profile(self, profile: UserProfile) -> bool:
+    def save_profile(self, profile: UserProfile, user_id: str) -> bool:
+        """Save profile keyed by user_id. user_id is now REQUIRED."""
+        if not user_id:
+            print("save_profile requires a user_id")
+            return False
         try:
             profile.compute_expected_salary()
+            profile_id = f"p_{user_id}"
             with self._connect() as conn:
                 cur = conn.cursor()
                 cols = (
-                    'id, name, email, "current_role", years_experience, desired_roles, skills, '
+                    'id, user_id, name, email, "current_role", years_experience, desired_roles, skills, '
                     "preferred_locations, remote_preference, current_salary, hike_percent_min, "
                     "hike_percent_max, salary_min, salary_max, salary_currency, industries, "
                     "company_size_preference, job_type, availability, willing_to_relocate, "
                     "auto_apply_enabled, strict_salary_filter, llm_provider, llm_api_key, llm_model"
                 )
                 vals = (
-                    "profile_1", profile.name, profile.email, profile.current_role,
+                    profile_id, user_id, profile.name, profile.email, profile.current_role,
                     profile.years_experience, json.dumps(profile.desired_roles),
                     json.dumps(profile.skills), json.dumps(profile.preferred_locations),
                     profile.remote_preference,
@@ -328,19 +381,19 @@ class JobDatabase:
                 )
                 if self.is_postgres:
                     placeholders = ", ".join(["%s"] * len(vals))
-                    raw_cols = [c.strip() for c in cols.split(",") if c.strip() != "id"]
-                    update_set = ", ".join([
-                        f'{c} = EXCLUDED.{c}' for c in raw_cols
-                    ])
+                    raw_cols = [c.strip() for c in cols.split(",") if c.strip() not in ("id", "user_id")]
+                    update_set = ", ".join([f'{c} = EXCLUDED.{c}' for c in raw_cols])
                     cur.execute(
                         f"INSERT INTO profiles ({cols}) VALUES ({placeholders}) "
-                        f"ON CONFLICT (id) DO UPDATE SET {update_set}",
+                        f"ON CONFLICT (user_id) DO UPDATE SET {update_set}",
                         vals,
                     )
                 else:
                     placeholders = ", ".join(["?"] * len(vals))
+                    # SQLite: delete-then-insert (no composite unique on user_id alone otherwise)
+                    cur.execute(self._q("DELETE FROM profiles WHERE user_id = ?"), (user_id,))
                     cur.execute(
-                        f"INSERT OR REPLACE INTO profiles ({cols}) VALUES ({placeholders})",
+                        f"INSERT INTO profiles ({cols}) VALUES ({placeholders})",
                         vals,
                     )
             return True
@@ -348,11 +401,13 @@ class JobDatabase:
             print(f"Error saving profile: {e}")
             return False
 
-    def get_profile(self) -> UserProfile | None:
+    def get_profile(self, user_id: str | None = None) -> UserProfile | None:
+        if not user_id:
+            return None
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
-                cur.execute(self._q("SELECT * FROM profiles WHERE id = 'profile_1'"))
+                cur.execute(self._q("SELECT * FROM profiles WHERE user_id = ?"), (user_id,))
                 row = cur.fetchone()
                 if not row:
                     return None
@@ -390,17 +445,22 @@ class JobDatabase:
             print(f"Error retrieving profile: {e}")
             return None
 
-    def get_applications(self, status: str | None = None) -> list[Application]:
+    def get_applications(self, user_id: str | None = None, status: str | None = None) -> list[Application]:
+        if not user_id:
+            return []
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
                 if status:
                     cur.execute(
-                        self._q("SELECT * FROM applications WHERE status = ? ORDER BY created_at DESC"),
-                        (status,),
+                        self._q("SELECT * FROM applications WHERE user_id = ? AND status = ? ORDER BY created_at DESC"),
+                        (user_id, status),
                     )
                 else:
-                    cur.execute(self._q("SELECT * FROM applications ORDER BY created_at DESC"))
+                    cur.execute(
+                        self._q("SELECT * FROM applications WHERE user_id = ? ORDER BY created_at DESC"),
+                        (user_id,),
+                    )
 
                 colnames = [d[0] for d in cur.description]
                 apps = []
@@ -421,17 +481,19 @@ class JobDatabase:
             print(f"Error retrieving applications: {e}")
             return []
 
-    def get_stats(self) -> dict:
+    def get_stats(self, user_id: str | None = None) -> dict:
+        if not user_id:
+            return {"total_jobs": 0, "total_applications": 0, "auto_applied": 0}
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT COUNT(*) FROM jobs")
+                cur.execute(self._q("SELECT COUNT(*) FROM jobs WHERE user_id = ?"), (user_id,))
                 jobs_count = cur.fetchone()[0]
-                cur.execute("SELECT COUNT(*) FROM applications")
+                cur.execute(self._q("SELECT COUNT(*) FROM applications WHERE user_id = ?"), (user_id,))
                 apps_count = cur.fetchone()[0]
                 cur.execute(
-                    self._q("SELECT COUNT(*) FROM applications WHERE status = ?"),
-                    (ApplicationStatus.AUTO_APPLIED.value,),
+                    self._q("SELECT COUNT(*) FROM applications WHERE user_id = ? AND status = ?"),
+                    (user_id, ApplicationStatus.AUTO_APPLIED.value),
                 )
                 auto = cur.fetchone()[0]
                 return {

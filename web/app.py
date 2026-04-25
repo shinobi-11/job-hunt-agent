@@ -380,7 +380,7 @@ async def firebase_login(payload: FirebaseLoginPayload, response: Response):
 
 @app.get("/api/profile")
 async def get_profile(user: dict = Depends(require_user)):
-    profile = _db().get_profile()
+    profile = _db().get_profile(user_id=user["id"])
     if not profile:
         return JSONResponse({"profile": None})
     return JSONResponse({"profile": _mask_key(profile.model_dump(mode="json"))})
@@ -422,7 +422,7 @@ async def discover_models(payload: ListModelsPayload, user: dict = Depends(requi
 
     key = payload.api_key
     if not key:
-        existing = _db().get_profile()
+        existing = _db().get_profile(user_id=user["id"])
         if existing and existing.llm_provider == payload.provider:
             key = existing.llm_api_key
     if not key:
@@ -449,14 +449,14 @@ async def list_providers():
 @app.post("/api/profile")
 async def save_profile(payload: ProfilePayload, user: dict = Depends(require_user)):
     # Preserve existing key if client sends a masked/empty value
-    existing = _db().get_profile()
+    existing = _db().get_profile(user_id=user["id"])
     data = payload.model_dump()
-    if existing and (not data.get("llm_api_key") or data["llm_api_key"] == "●●●●●●●●"):
+    if existing and (not data.get("llm_api_key") or data["llm_api_key"] in ("●●●●●●●●", "")):
         data["llm_api_key"] = existing.llm_api_key
 
     profile = UserProfile(**data)
     profile.compute_expected_salary()
-    _db().save_profile(profile)
+    _db().save_profile(profile, user_id=user["id"])
     return {"ok": True, "profile": _mask_key(profile.model_dump(mode="json"))}
 
 
@@ -468,29 +468,63 @@ def _mask_key(payload: dict) -> dict:
     return payload
 
 
+def _user_resume_path(user_id: str, suffix: str = ".pdf") -> Path:
+    """Per-user resume file path. Suffix preserved from upload."""
+    base = Path(_cfg().resume_path).parent
+    return base / "resumes" / f"{user_id}{suffix}"
+
+
+def _find_user_resume(user_id: str) -> Path | None:
+    base = Path(_cfg().resume_path).parent / "resumes"
+    if not base.exists():
+        return None
+    for sfx in (".pdf", ".docx", ".doc"):
+        p = base / f"{user_id}{sfx}"
+        if p.exists():
+            return p
+    return None
+
+
 @app.post("/api/resume")
 async def upload_resume(file: UploadFile = File(...), user: dict = Depends(require_user)):
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in {".pdf", ".docx", ".doc"}:
         raise HTTPException(400, "Only PDF or DOCX supported")
 
-    dest = Path(_cfg().resume_path)
+    # Remove any existing resume for this user (different format)
+    old = _find_user_resume(user["id"])
+    if old:
+        old.unlink(missing_ok=True)
+
+    dest = _user_resume_path(user["id"], suffix)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(400, "Empty file received")
+    dest.write_bytes(contents)
 
     try:
         text = ResumeParser.parse_resume(str(dest))
     except Exception as e:
+        dest.unlink(missing_ok=True)
         raise HTTPException(400, f"Parse failed: {e}")
 
-    return {"ok": True, "filename": file.filename, "chars": len(text)}
+    if not text or len(text.strip()) < 50:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(400, "Resume parsed but text content is too short — possibly an image-only PDF. Try a text-based PDF/DOCX.")
+
+    return {
+        "ok": True,
+        "filename": file.filename,
+        "size_bytes": len(contents),
+        "chars": len(text),
+    }
 
 
 @app.get("/api/resume")
 async def get_resume_info(user: dict = Depends(require_user)):
-    p = Path(_cfg().resume_path)
-    if not p.exists():
+    p = _find_user_resume(user["id"])
+    if not p:
         return {"exists": False}
     return {
         "exists": True,
@@ -500,6 +534,15 @@ async def get_resume_info(user: dict = Depends(require_user)):
     }
 
 
+@app.delete("/api/resume")
+async def delete_resume(user: dict = Depends(require_user)):
+    p = _find_user_resume(user["id"])
+    if not p:
+        raise HTTPException(404, "No resume to delete")
+    p.unlink()
+    return {"ok": True}
+
+
 @app.get("/api/diagnostics")
 async def get_diagnostics(user: dict = Depends(require_user)):
     """Last cycle's source fan-out + funnel counts."""
@@ -507,10 +550,14 @@ async def get_diagnostics(user: dict = Depends(require_user)):
 
 
 @app.get("/api/status")
-async def get_status():
+async def get_status(user: dict | None = Depends(get_current_user)):
     db = _db()
-    stats = db.get_stats()
-    apps = db.get_applications()
+    if user:
+        stats = db.get_stats(user_id=user["id"])
+        apps = db.get_applications(user_id=user["id"])
+    else:
+        stats = {"total_jobs": 0}
+        apps = []
     auto = sum(1 for a in apps if a.status == ApplicationStatus.AUTO_APPLIED)
     semi = sum(1 for a in apps if a.status == ApplicationStatus.PENDING)
     manual = sum(1 for a in apps if a.status == ApplicationStatus.MANUAL_FLAG)
@@ -535,7 +582,7 @@ async def start_search(duration_minutes: int = 30, user: dict = Depends(require_
     if STATE.running:
         raise HTTPException(409, "Search already running")
 
-    profile = _db().get_profile()
+    profile = _db().get_profile(user_id=user["id"])
     if not profile:
         raise HTTPException(400, "No profile configured")
     if not profile.desired_roles:
@@ -554,10 +601,11 @@ async def start_search(duration_minutes: int = 30, user: dict = Depends(require_
     STATE.started_at = datetime.now()
     STATE.events.clear()
     STATE._last_seen = 0
+    STATE.user_id = user["id"]
     STATE.push({"type": "info", "message": f"Search started — {duration_minutes} min"})
 
     STATE.thread = threading.Thread(
-        target=_run_search_loop, args=(duration_minutes,), daemon=True
+        target=_run_search_loop, args=(duration_minutes, user["id"]), daemon=True
     )
     STATE.thread.start()
     return {"ok": True}
@@ -590,8 +638,8 @@ async def list_applications(
     min_score: int = 51,
     user: dict = Depends(require_user),
 ):
-    """Returns applications with match_score > min_score (default 50, exclusive)."""
-    apps = _db().get_applications(status=status)
+    """Returns applications with match_score >= min_score (default 51) for current user."""
+    apps = _db().get_applications(user_id=user["id"], status=status)
     apps = [a for a in apps if (a.match_score or 0) >= min_score]
     return {"applications": [a.model_dump(mode="json") for a in apps]}
 
@@ -613,7 +661,7 @@ async def update_application_status(
         raise HTTPException(400, f"Invalid status. Must be one of: {sorted(valid)}")
 
     db = _db()
-    apps = db.get_applications()
+    apps = db.get_applications(user_id=user["id"])
     target = next((a for a in apps if a.id == app_id), None)
     if not target:
         raise HTTPException(404, "Application not found")
@@ -624,13 +672,13 @@ async def update_application_status(
         target.applied_by = "manual"
     if payload.notes:
         target.notes = (target.notes or "") + f"\n[user note] {payload.notes}"
-    db.add_application(target)
+    db.add_application(target, user_id=user["id"])
     return {"ok": True, "application": target.model_dump(mode="json")}
 
 
 @app.get("/api/applications/{app_id}")
 async def application_detail(app_id: str, user: dict = Depends(require_user)):
-    apps = _db().get_applications()
+    apps = _db().get_applications(user_id=user["id"])
     match = next(
         (a for a in apps if a.id == app_id or app_id.lower() in a.company.lower()),
         None,
@@ -656,9 +704,10 @@ async def events(request: Request):
     return EventSourceResponse(publisher())
 
 
-def _run_search_loop(duration_minutes: int) -> None:
-    """Worker thread. Rebuilds matcher from profile each cycle so API key edits
-    made via Settings during a live search take effect on the next cycle."""
+def _run_search_loop(duration_minutes: int, user_id: str) -> None:
+    """Worker thread, scoped to one user.
+    Rebuilds matcher from profile each cycle so API key edits during a live
+    search take effect on the next cycle."""
     try:
         cfg = _cfg()
         db = JobDatabase(db_path=cfg.database_path)
@@ -671,7 +720,7 @@ def _run_search_loop(duration_minutes: int) -> None:
                 time.sleep(2)
                 continue
 
-            profile = db.get_profile()
+            profile = db.get_profile(user_id=user_id)
             if profile is None:
                 STATE.push({"type": "error", "message": "Profile missing — aborting"})
                 break
@@ -697,7 +746,7 @@ def _run_search_loop(duration_minutes: int) -> None:
             discovered = searcher.run_search()
             STATE.last_diagnostics = searcher.diagnostics.as_dict()
             STATE.push({"type": "diagnostics", "data": STATE.last_diagnostics})
-            new_jobs = [j for j in discovered if db.add_job(j)]
+            new_jobs = [j for j in discovered if db.add_job(j, user_id=user_id)]
             STATE.push({"type": "discovered", "count": len(new_jobs)})
 
             for job in new_jobs:
@@ -707,9 +756,9 @@ def _run_search_loop(duration_minutes: int) -> None:
                     time.sleep(1)
 
                 score = matcher.evaluate_job(job, profile)
-                db.add_match_score(score)
-                application = _route_application(job, score, profile)
-                db.add_application(application)
+                db.add_match_score(score, user_id=user_id)
+                application = _route_application(job, score, profile, user_id=user_id)
+                db.add_application(application, user_id=user_id)
 
                 if score.tier == "auto" and profile.auto_apply_enabled:
                     stats["applied"] += 1
@@ -752,7 +801,7 @@ def _run_search_loop(duration_minutes: int) -> None:
         STATE.running = False
 
 
-def _route_application(job: Job, score: MatchScore, profile: UserProfile) -> Application:
+def _route_application(job: Job, score: MatchScore, profile: UserProfile, user_id: str | None = None) -> Application:
     """Route a scored job. For score≥85 + auto-apply ON + safe source, attempt
     real Playwright submission. LinkedIn/Naukri/iimjobs/Instahyre are NEVER
     auto-submitted (login required, ban risk) — they're flagged for manual.
@@ -769,8 +818,8 @@ def _route_application(job: Job, score: MatchScore, profile: UserProfile) -> App
             from pathlib import Path as _P
             allowed, reason = is_auto_applicable(job)
             if allowed:
-                resume = _P(get_config().resume_path)
-                result = auto_submit_sync(job, profile, resume if resume.exists() else None)
+                resume = _find_user_resume(user_id) if user_id else None
+                result = auto_submit_sync(job, profile, resume)
                 if result.get("submitted"):
                     status = ApplicationStatus.AUTO_APPLIED
                     applied_at = datetime.now()

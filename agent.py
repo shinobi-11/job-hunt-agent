@@ -35,6 +35,9 @@ class CredentialGateError(Exception):
     """Raised when required credentials are missing (PROTOCOL 5)."""
 
 
+CLI_USER_ID = "cli_local_user"
+
+
 class JobHuntAgent:
     """Main orchestrator coordinating search → evaluate → apply workflow."""
 
@@ -92,7 +95,7 @@ class JobHuntAgent:
     # ─── Initialization ──────────────────────────────────────────
 
     def initialize(self) -> None:
-        existing = self.db.get_profile()
+        existing = self.db.get_profile(user_id=CLI_USER_ID)
         profile_summary = None
         if existing:
             profile_summary = (
@@ -110,7 +113,7 @@ class JobHuntAgent:
         else:
             self.cli.print_welcome()
             self.profile = self._interactive_profile_setup()
-            self.db.save_profile(self.profile)
+            self.db.save_profile(self.profile, user_id=CLI_USER_ID)
             self.cli.print_success(f"Profile created: {self.profile.name}")
             self.cli.print_profile(self.profile)
             self._print_salary_summary()
@@ -346,7 +349,7 @@ class JobHuntAgent:
                 self.profile.llm_provider = provider
                 if key:
                     self.profile.llm_api_key = key
-                self.db.save_profile(self.profile)
+                self.db.save_profile(self.profile, user_id=CLI_USER_ID)
                 try:
                     self._ensure_matcher()
                     self.cli.print_success(
@@ -381,7 +384,7 @@ class JobHuntAgent:
                 self._print_salary_summary()
                 continue
 
-            self.db.save_profile(self.profile)
+            self.db.save_profile(self.profile, user_id=CLI_USER_ID)
             self.cli.print_success("Profile updated.")
 
         self.cli.print_profile(self.profile)
@@ -505,7 +508,7 @@ class JobHuntAgent:
             self.cli.print_rule(f"Cycle #{cycle}", style="bright_magenta")
 
             # Re-load profile in case the user edited it via the web UI mid-flight
-            fresh = self.db.get_profile()
+            fresh = self.db.get_profile(user_id=CLI_USER_ID)
             if fresh:
                 self.profile = fresh
                 try:
@@ -532,7 +535,7 @@ class JobHuntAgent:
                 for k, v in cycle_stats.items():
                     stats[k] += v
 
-            total_stats = self.db.get_stats()
+            total_stats = self.db.get_stats(user_id=CLI_USER_ID)
             elapsed = int((datetime.now() - self.session_start).total_seconds())
             self.cli.print_search_status(
                 cycle=cycle,
@@ -565,7 +568,7 @@ class JobHuntAgent:
             discovered = searcher.run_search()
             progress.update(task, advance=70)
 
-        return [job for job in discovered if self.db.add_job(job)]
+        return [job for job in discovered if self.db.add_job(job, user_id=CLI_USER_ID)]
 
     def _evaluate_and_route(self, jobs: list[Job]) -> dict[str, int]:
         if not self.profile:
@@ -579,9 +582,9 @@ class JobHuntAgent:
             task = progress.add_task("evaluating", total=len(jobs))
             for job in jobs:
                 score = self.matcher.evaluate_job(job, self.profile)
-                self.db.add_match_score(score)
+                self.db.add_match_score(score, user_id=CLI_USER_ID)
                 application = self._route_application(job, score)
-                self.db.add_application(application)
+                self.db.add_application(application, user_id=CLI_USER_ID)
 
                 if score.tier == "auto" and self.profile.auto_apply_enabled:
                     stats["applied"] += 1
@@ -651,11 +654,11 @@ class JobHuntAgent:
     # ─── Views ───────────────────────────────────────────────────
 
     def show_applications(self, status: str | None = None) -> None:
-        apps = self.db.get_applications(status=status)
+        apps = self.db.get_applications(user_id=CLI_USER_ID, status=status)
         self.cli.print_applications_table(apps)
 
     def show_application_detail(self, app_id: str) -> None:
-        apps = self.db.get_applications()
+        apps = self.db.get_applications(user_id=CLI_USER_ID)
         match = next((a for a in apps if a.id.startswith(app_id) or app_id.lower() in a.company.lower()), None)
         if not match:
             self.cli.print_error(f"No application matching '{app_id}' found.")
@@ -663,8 +666,8 @@ class JobHuntAgent:
         self.cli.print_application_detail(match)
 
     def show_stats(self) -> None:
-        stats = self.db.get_stats()
-        apps = self.db.get_applications()
+        stats = self.db.get_stats(user_id=CLI_USER_ID)
+        apps = self.db.get_applications(user_id=CLI_USER_ID)
         auto = sum(1 for a in apps if a.status == ApplicationStatus.AUTO_APPLIED)
         semi = sum(1 for a in apps if a.status == ApplicationStatus.PENDING)
         manual = sum(1 for a in apps if a.status == ApplicationStatus.MANUAL_FLAG)

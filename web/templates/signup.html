@@ -169,7 +169,13 @@
         }
         confirmationResult = await signInWithPhoneNumber(auth, phone, window.recaptchaVerifier);
         document.getElementById("otpStep").hidden = false;
-      } catch (e) { showErr("OTP send failed: " + e.message); }
+      } catch (e) {
+        if (e.code === "auth/billing-not-enabled" || e.message.includes("billing-not-enabled")) {
+          showErr("Phone OTP requires Firebase Blaze (pay-as-you-go) plan. Free tier doesn't include SMS. Use Email/Password or Google sign-in instead.");
+        } else {
+          showErr("OTP send failed: " + e.message);
+        }
+      }
     };
     document.getElementById("verifyOtpBtn").onclick = async () => {
       if (!confirmationResult) return;

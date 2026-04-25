@@ -111,8 +111,9 @@ class TestLifecycle:
         assert agent.is_running is False
 
     def test_initialize_loads_existing_profile(self, agent, sample_profile):
+        from agent import CLI_USER_ID
         sample_profile.llm_api_key = TEST_API_KEY
-        agent.db.save_profile(sample_profile)
+        agent.db.save_profile(sample_profile, user_id=CLI_USER_ID)
         with patch.object(agent.cli, "print_header"), \
              patch.object(agent.cli, "print_profile"), \
              patch.object(agent, "_ensure_matcher"):
@@ -123,11 +124,12 @@ class TestLifecycle:
 
 class TestShowMethods:
     def test_show_applications_calls_cli(self, agent, sample_application):
-        agent.db.save_profile(UserProfile(name="T", email="t@t.com"))
+        from agent import CLI_USER_ID
+        agent.db.save_profile(UserProfile(name="T", email="t@t.com"), user_id=CLI_USER_ID)
         agent.db.add_job(Job(
             title="J", company="C", location="L", description="d",
             source="S", url="https://x.com/1",
-        ))
+        ), user_id=CLI_USER_ID)
         with patch.object(agent.cli, "print_applications_table") as mock_print:
             agent.show_applications()
             mock_print.assert_called_once()

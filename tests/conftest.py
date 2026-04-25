@@ -136,7 +136,8 @@ def pytest_addoption(parser):
 
 @pytest.fixture(autouse=True)
 def setup_test_env(monkeypatch):
-    """Set up test environment variables."""
+    """Set up test environment variables and isolate from prod DB."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)  # never hit prod Postgres in tests
     monkeypatch.setenv("GEMINI_API_KEY", TEST_API_KEY)
     monkeypatch.setenv("AUTO_APPLY_THRESHOLD", "85")
     monkeypatch.setenv("SEMI_AUTO_THRESHOLD", "70")

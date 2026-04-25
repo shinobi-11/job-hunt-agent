@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    # Force tests to use a fresh tmp SQLite — never the production Postgres
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.setenv("LOG_PATH", str(tmp_path / "agent.log"))
     monkeypatch.setenv("RESUME_PATH", str(tmp_path / "resume.pdf"))

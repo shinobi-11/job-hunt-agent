@@ -247,12 +247,16 @@
               <input type="checkbox" name="willing_to_relocate"/> Willing to relocate
             </label>
             <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--lg-text-2)">
-              <input type="checkbox" name="auto_apply_enabled" checked/> Auto-apply (≥85)
+              <input type="checkbox" name="auto_apply_enabled" checked/> Auto-apply on safe sources (≥85)
             </label>
             <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--lg-text-2)">
               <input type="checkbox" name="strict_salary_filter" checked/> Strict salary filter
             </label>
           </div>
+          <p style="margin-top:10px;padding:12px 14px;background:rgba(234,179,8,0.08);border-left:3px solid #ea580c;border-radius:8px;font-size:12px;color:var(--lg-text-2);line-height:1.5">
+            <strong>About auto-apply:</strong> Only runs on RemoteOK / Remotive / Jobicy / Himalayas / Arbeitnow / Working Nomads / WWR / USAJobs (safe).
+            <strong>LinkedIn / Naukri / iimjobs / Instahyre are NEVER auto-submitted</strong> — they require login + violate ToS, so they're queued for you to apply manually with one click.
+          </p>
 
           <fieldset style="margin-top:22px;padding:18px 22px;border-radius:14px;border:1px solid rgba(139,92,246,0.25);background:rgba(139,92,246,0.05)">
             <legend style="padding:2px 10px;font-weight:700;font-size:13px;color:#7c3aed">🤖 AI Provider</legend>
@@ -271,6 +275,18 @@
                 <label class="lg-label">API Key</label>
                 <input class="lg-input" name="llm_api_key" type="password" autocomplete="off" id="apiKeyInput" placeholder="Paste your key"/>
               </div>
+            </div>
+            <div style="margin-top:14px">
+              <label class="lg-label">
+                Model
+                <button type="button" class="lg-btn small" id="discoverModelsBtn" style="margin-left:10px">Discover available models</button>
+              </label>
+              <select class="lg-select" name="llm_model" id="llmModelSelect">
+                <option value="">— use provider default —</option>
+              </select>
+              <p id="modelHint" style="margin-top:6px;font-size:12px;color:var(--lg-text-dim)">
+                Click "Discover available models" after pasting an API key to see what your key has access to.
+              </p>
             </div>
             <p id="providerHint" style="margin-top:10px;font-size:12px;color:var(--lg-text-dim)"></p>
           </fieldset>

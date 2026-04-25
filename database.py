@@ -157,6 +157,7 @@ class JobDatabase:
                 strict_salary_filter {bool_t} DEFAULT {true_lit},
                 llm_provider {text} DEFAULT 'gemini',
                 llm_api_key {text},
+                llm_model {text},
                 created_at {ts}
             )""",
         ]
@@ -177,6 +178,7 @@ class JobDatabase:
                     ("strict_salary_filter", "BOOLEAN DEFAULT 1"),
                     ("llm_provider", "TEXT DEFAULT 'gemini'"),
                     ("llm_api_key", "TEXT"),
+                    ("llm_model", "TEXT"),
                 ]:
                     if col not in existing:
                         cur.execute(f"ALTER TABLE profiles ADD COLUMN {col} {defn}")
@@ -300,7 +302,7 @@ class JobDatabase:
                     "preferred_locations, remote_preference, current_salary, hike_percent_min, "
                     "hike_percent_max, salary_min, salary_max, salary_currency, industries, "
                     "company_size_preference, job_type, availability, willing_to_relocate, "
-                    "auto_apply_enabled, strict_salary_filter, llm_provider, llm_api_key"
+                    "auto_apply_enabled, strict_salary_filter, llm_provider, llm_api_key, llm_model"
                 )
                 vals = (
                     "profile_1", profile.name, profile.email, profile.current_role,
@@ -313,7 +315,7 @@ class JobDatabase:
                     json.dumps(profile.job_type), profile.availability,
                     profile.willing_to_relocate, profile.auto_apply_enabled,
                     profile.strict_salary_filter,
-                    profile.llm_provider, profile.llm_api_key,
+                    profile.llm_provider, profile.llm_api_key, profile.llm_model,
                 )
                 if self.is_postgres:
                     placeholders = ", ".join(["%s"] * len(vals))
@@ -373,6 +375,7 @@ class JobDatabase:
                                               if d.get("strict_salary_filter") is not None else 1),
                     llm_provider=d.get("llm_provider") or "gemini",
                     llm_api_key=d.get("llm_api_key"),
+                    llm_model=d.get("llm_model"),
                 )
         except Exception as e:
             print(f"Error retrieving profile: {e}")

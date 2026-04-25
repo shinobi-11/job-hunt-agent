@@ -71,6 +71,7 @@ class UserProfile(BaseModel):
     strict_salary_filter: bool = True
     llm_provider: str = "gemini"
     llm_api_key: str | None = None
+    llm_model: str | None = None
     created_at: datetime = Field(default_factory=datetime.now)
 
     def compute_expected_salary(self) -> None:

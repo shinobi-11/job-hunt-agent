@@ -17,6 +17,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
+# Playwright + Chromium for auto-submit on safe sources
+RUN playwright install --with-deps chromium
+
 # HF runs as user 1000 — make /app writable by it
 RUN useradd -m -u 1000 user
 USER user

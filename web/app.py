@@ -363,6 +363,35 @@ class ProfilePayload(BaseModel):
     strict_salary_filter: bool = True
     llm_provider: str = "gemini"
     llm_api_key: str | None = None
+    llm_model: str | None = None
+
+
+class ListModelsPayload(BaseModel):
+    provider: str
+    api_key: str | None = None  # if not given, use the saved key
+
+
+@app.post("/api/llm/models")
+async def discover_models(payload: ListModelsPayload, user: dict = Depends(require_user)):
+    """Given a provider + API key, list models the key can access."""
+    from llm_providers import list_models, PROVIDERS
+
+    if payload.provider not in PROVIDERS:
+        raise HTTPException(400, f"Unknown provider: {payload.provider}")
+
+    key = payload.api_key
+    if not key:
+        existing = _db().get_profile()
+        if existing and existing.llm_provider == payload.provider:
+            key = existing.llm_api_key
+    if not key:
+        raise HTTPException(400, "Provide an API key (or save one to your profile first)")
+
+    try:
+        models = list_models(payload.provider, key)
+        return {"models": models, "default": PROVIDERS[payload.provider]["default_model"]}
+    except Exception as e:
+        raise HTTPException(400, f"Could not list models: {str(e)[:200]}")
 
 
 @app.get("/api/providers")
@@ -683,18 +712,42 @@ def _run_search_loop(duration_minutes: int) -> None:
 
 
 def _route_application(job: Job, score: MatchScore, profile: UserProfile) -> Application:
+    """Route a scored job. For score≥85 + auto-apply ON + safe source, attempt
+    real Playwright submission. LinkedIn/Naukri/iimjobs/Instahyre are NEVER
+    auto-submitted (login required, ban risk) — they're flagged for manual.
+    """
+    note_prefix = ""
+    status = ApplicationStatus.MANUAL_FLAG
+    applied_at: datetime | None = None
+    applied_by = "manual"
+
     if score.tier == "auto" and profile.auto_apply_enabled:
-        status = ApplicationStatus.AUTO_APPLIED
-        applied_at: datetime | None = datetime.now()
-        applied_by = "system"
+        # Try real auto-submission via Playwright
+        try:
+            from applier import is_auto_applicable, auto_submit_sync
+            from pathlib import Path as _P
+            allowed, reason = is_auto_applicable(job)
+            if allowed:
+                resume = _P(get_config().resume_path)
+                result = auto_submit_sync(job, profile, resume if resume.exists() else None)
+                if result.get("submitted"):
+                    status = ApplicationStatus.AUTO_APPLIED
+                    applied_at = datetime.now()
+                    applied_by = "system"
+                    note_prefix = f"[AUTO-SUBMITTED — {result.get('ats','?')}, {result.get('fields_filled',0)} fields] "
+                else:
+                    status = ApplicationStatus.PENDING
+                    note_prefix = f"[HIGH MATCH — auto-submit failed: {result.get('reason','?')[:80]}] "
+            else:
+                status = ApplicationStatus.PENDING
+                note_prefix = f"[HIGH MATCH — {reason}, apply manually] "
+        except Exception as e:
+            status = ApplicationStatus.PENDING
+            note_prefix = f"[HIGH MATCH — auto-submit error: {str(e)[:80]}] "
     elif score.tier == "semi_auto":
         status = ApplicationStatus.PENDING
-        applied_at = None
-        applied_by = "manual"
-    else:
-        status = ApplicationStatus.MANUAL_FLAG
-        applied_at = None
-        applied_by = "manual"
+        note_prefix = "[Review recommended] "
+    # else: MANUAL_FLAG (default already set)
 
     return Application(
         job_id=job.id,
@@ -705,7 +758,7 @@ def _route_application(job: Job, score: MatchScore, profile: UserProfile) -> App
         match_tier=score.tier,
         applied_at=applied_at,
         applied_by=applied_by,
-        notes=score.reason,
+        notes=note_prefix + (score.reason or ""),
     )
 
 

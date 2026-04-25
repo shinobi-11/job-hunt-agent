@@ -198,9 +198,56 @@ function updateProviderHint() {
   }
 }
 document.addEventListener("change", e => {
-  if (e.target.id === "providerSelect") updateProviderHint();
+  if (e.target.id === "providerSelect") {
+    updateProviderHint();
+    // Reset model dropdown when provider changes
+    const sel = $("#llmModelSelect");
+    if (sel) sel.innerHTML = '<option value="">— use provider default —</option>';
+  }
 });
 loadProviders();
+
+// ─── Model discovery ───
+async function discoverModels() {
+  const btn = $("#discoverModelsBtn");
+  const provider = $("#providerSelect")?.value || "gemini";
+  const apiKey = $("#apiKeyInput")?.value || null;
+
+  if (!btn) return;
+  btn.disabled = true; btn.textContent = "Discovering…";
+  $("#modelHint").textContent = "Querying provider for available models…";
+
+  try {
+    const r = await fetch(`${API}/api/llm/models`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({provider, api_key: apiKey}),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      throw new Error(err.detail || "Discovery failed");
+    }
+    const { models, default: defaultModel } = await r.json();
+    const sel = $("#llmModelSelect");
+    sel.innerHTML = '<option value="">— use provider default —</option>';
+    for (const m of models) {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.textContent = m.recommended ? `★ ${m.label}` : m.label;
+      sel.appendChild(opt);
+    }
+    $("#modelHint").innerHTML = `Found <strong>${models.length}</strong> models. Default: <code>${defaultModel}</code>. ★ = recommended.`;
+    toast(`Found ${models.length} models for ${provider}`);
+  } catch (e) {
+    $("#modelHint").innerHTML = `<span style="color:#dc2626">${escapeHtml(e.message)}</span>`;
+    toast("Discovery failed: " + e.message, "error");
+  } finally {
+    btn.disabled = false; btn.textContent = "Discover available models";
+  }
+}
+document.addEventListener("click", e => {
+  if (e.target.id === "discoverModelsBtn") discoverModels();
+});
 
 // ─── Profile view ───
 async function renderProfile() {
@@ -228,6 +275,7 @@ async function renderProfile() {
     ["Strict Salary Filter", profile.strict_salary_filter ? "On ✓" : "Off"],
     ["Auto-Apply", profile.auto_apply_enabled ? "On ✓" : "Off"],
     ["AI Provider", PROVIDERS[profile.llm_provider]?.label || profile.llm_provider || "—"],
+    ["AI Model", profile.llm_model || `(default: ${PROVIDERS[profile.llm_provider]?.default_model || "—"})`],
     ["API Key", profile.llm_api_key ? `Saved (${profile.llm_api_key})` : "Not set"],
   ];
   view.innerHTML = `
@@ -264,6 +312,21 @@ async function fillSettingsForm() {
     form.llm_api_key.placeholder = profile.llm_api_key
       ? `Saved: ${profile.llm_api_key} (paste new to replace)`
       : (PROVIDERS[profile.llm_provider]?.key_hint || "Paste your key");
+  }
+  // Show currently-saved model in dropdown
+  if (form.llm_model) {
+    const sel = $("#llmModelSelect");
+    if (profile.llm_model) {
+      // Inject the saved model as an option even if user hasn't discovered yet
+      const exists = [...sel.options].some(o => o.value === profile.llm_model);
+      if (!exists) {
+        const opt = document.createElement("option");
+        opt.value = profile.llm_model;
+        opt.textContent = `${profile.llm_model} (saved)`;
+        sel.appendChild(opt);
+      }
+      sel.value = profile.llm_model;
+    }
   }
   updateProviderHint();
   updateSalaryPreview();
@@ -317,6 +380,7 @@ $("#profileForm").onsubmit = async (e) => {
     strict_salary_filter: f.strict_salary_filter.checked,
     llm_provider: f.llm_provider?.value || "gemini",
     llm_api_key: f.llm_api_key?.value || null,
+    llm_model: f.llm_model?.value || null,
   };
   const r = await fetch(`${API}/api/profile`, {
     method: "POST",

@@ -145,3 +145,68 @@ def build_provider(name: str, api_key: str, model: str | None = None) -> LLMProv
     cls = _FACTORY[key]
     resolved_model = model or PROVIDERS[key]["default_model"]
     return cls(api_key=api_key, model=resolved_model)
+
+
+def list_models(provider: str, api_key: str) -> list[dict]:
+    """Discover models available for the given provider+key.
+    Returns [{id, label, recommended}] sorted with recommended first."""
+    p = (provider or "gemini").strip().lower()
+
+    def _wrap(items: list[tuple[str, str, bool]]) -> list[dict]:
+        out = [{"id": i[0], "label": i[1], "recommended": i[2]} for i in items]
+        out.sort(key=lambda x: (not x["recommended"], x["id"]))
+        return out
+
+    if p == "gemini":
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        models = []
+        for m in genai.list_models():
+            if "generateContent" in (m.supported_generation_methods or []):
+                mid = m.name.replace("models/", "")
+                rec = mid in {"gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"}
+                models.append((mid, m.display_name or mid, rec))
+        return _wrap(models)
+
+    if p == "openai":
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        models = []
+        for m in client.models.list().data:
+            if "gpt" in m.id.lower():
+                rec = m.id in {"gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"}
+                models.append((m.id, m.id, rec))
+        return _wrap(models)
+
+    if p == "anthropic":
+        # Anthropic models endpoint — best to call /v1/models
+        import requests
+        r = requests.get(
+            "https://api.anthropic.com/v1/models",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        models = []
+        for m in data.get("data", []):
+            mid = m.get("id", "")
+            label = m.get("display_name", mid)
+            rec = "haiku-4-5" in mid or "sonnet-4-6" in mid or "opus-4-7" in mid
+            models.append((mid, label, rec))
+        return _wrap(models)
+
+    if p == "grok":
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
+        models = []
+        for m in client.models.list().data:
+            mid = m.id
+            rec = "grok-2" in mid or "grok-3" in mid
+            models.append((mid, mid, rec))
+        return _wrap(models)
+
+    return []

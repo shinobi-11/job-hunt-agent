@@ -12,49 +12,29 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT_VERSION = "v1.1.0"
 
-MATCH_PROMPT_TEMPLATE = """You are an expert technical recruiter evaluating job-candidate fit.
+MATCH_PROMPT_TEMPLATE = """Score this job-candidate fit. Return ONLY JSON.
 
-Analyze the following job posting against the candidate's profile and return a structured JSON score.
-
-=== CANDIDATE PROFILE ===
-Name: {name}
-Current Role: {current_role}
-Years of Experience: {years_experience}
-Desired Roles: {desired_roles}
+CANDIDATE
+Roles wanted: {desired_roles}
 Skills: {skills}
-Preferred Locations: {preferred_locations}
-Remote Preference: {remote_preference}
-Salary Expectation: {salary_range}
-Industries of Interest: {industries}
-Company Size Preference: {company_size}
-Willing to Relocate: {willing_to_relocate}
+Exp: {years_experience}y as {current_role}
+Locations: {preferred_locations} | Remote: {remote_preference}
+Salary: {salary_range}
 
-=== JOB POSTING ===
-Title: {job_title}
-Company: {company}
-Location: {location}
-Remote: {remote}
+JOB
+{job_title} @ {company}
+Location: {location} | Remote: {remote}
 Salary: {salary}
-Description: {description}
-Requirements: {requirements}
+{description}
+Req: {requirements}
 
-=== SCORING RUBRIC ===
-- 85-100 (AUTO tier): Strong fit. Critical skills match, location/remote acceptable, salary aligned.
-- 70-84 (SEMI_AUTO tier): Good fit with minor gaps. Most skills present, trainable gaps.
-- 0-69 (MANUAL tier): Unclear fit. Missing core skills, or niche/unusual requirements.
+RUBRIC
+85-100 = strong fit (critical skills + location + salary all match) → "auto"
+70-84 = good fit, minor trainable gaps → "semi_auto"
+<70 = poor fit → "manual"
 
-=== OUTPUT FORMAT ===
-Return ONLY valid JSON matching this schema (no markdown, no prose):
-{{
-  "score": <integer 0-100>,
-  "reason": "<brief 1-2 sentence explanation of overall fit>",
-  "matched_skills": [<list of skills from profile that match job requirements>],
-  "missing_skills": [<list of required skills NOT in profile>],
-  "cultural_fit": "<assessment of company/role culture fit>",
-  "salary_alignment": "<salary analysis: aligned, below, above, or unknown>",
-  "tier": "<auto|semi_auto|manual>",
-  "confidence": <float 0.0-1.0, how confident in this score>
-}}"""
+JSON ONLY (no markdown):
+{{"score":int,"tier":"auto|semi_auto|manual","reason":"1 sentence","matched_skills":[...top 5],"missing_skills":[...top 5],"confidence":float}}"""
 
 
 class JobMatcher:
@@ -87,15 +67,16 @@ class JobMatcher:
 
     @classmethod
     def from_profile(cls, profile: UserProfile, env_fallback_key: str | None = None) -> "JobMatcher":
-        """Prefer the user's chosen provider + key; fall back to env var for backwards compat."""
+        """Prefer the user's chosen provider + key + model; fall back to env var for backwards compat."""
         provider = (getattr(profile, "llm_provider", None) or "gemini").lower()
         key = getattr(profile, "llm_api_key", None) or env_fallback_key
+        model = getattr(profile, "llm_model", None)
         if not key:
             raise ValueError(
                 f"No API key available for provider={provider}. "
                 f"Set one in the profile or provide a fallback."
             )
-        return cls(api_key=key, provider=provider)
+        return cls(api_key=key, provider=provider, model_name=model)
 
     def evaluate_job(self, job: Job, profile: UserProfile) -> MatchScore:
         """Evaluate a job. Retries transient errors, falls back to manual on failure."""
@@ -137,24 +118,20 @@ class JobMatcher:
             job_salary = f"${int(job.salary_min):,} - ${int(job.salary_max):,} {job.currency or ''}"
 
         return MATCH_PROMPT_TEMPLATE.format(
-            name=profile.name,
-            current_role=profile.current_role or "Not specified",
+            current_role=(profile.current_role or "—")[:50],
             years_experience=profile.years_experience,
-            desired_roles=", ".join(profile.desired_roles) or "Any",
-            skills=", ".join(profile.skills) or "Not specified",
-            preferred_locations=", ".join(profile.preferred_locations) or "Any",
+            desired_roles=", ".join(profile.desired_roles[:5]) or "Any",
+            skills=", ".join(profile.skills[:10]) or "—",
+            preferred_locations=", ".join(profile.preferred_locations[:3]) or "Any",
             remote_preference=profile.remote_preference,
             salary_range=salary_range,
-            industries=", ".join(profile.industries) or "Any",
-            company_size=profile.company_size_preference or "Any",
-            willing_to_relocate="Yes" if profile.willing_to_relocate else "No",
-            job_title=job.title,
-            company=job.company,
-            location=job.location,
-            remote=job.remote or "Not specified",
+            job_title=job.title[:120],
+            company=job.company[:60],
+            location=(job.location or "—")[:60],
+            remote=job.remote or "—",
             salary=job_salary,
-            description=job.description[:1500],
-            requirements=", ".join(job.requirements) if job.requirements else "Not listed",
+            description=job.description[:600],  # cut from 1500 → 600 chars (saves ~250 tokens/call)
+            requirements=", ".join((job.requirements or [])[:8])[:300] if job.requirements else "—",
         )
 
     def _parse_response(self, response_text: str, job_id: str) -> MatchScore:

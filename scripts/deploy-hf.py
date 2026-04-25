@@ -75,7 +75,21 @@ def main():
         "ADMIN_EMAIL": "admin@job-hunt.local",
         "ADMIN_SECRET_KEY": os.environ.get("SESSION_SECRET", "fallback-secret"),
         "ENVIRONMENT": "production",
+        # Firebase web config (public, safe to expose)
+        "FIREBASE_API_KEY": os.environ.get("FIREBASE_API_KEY"),
+        "FIREBASE_AUTH_DOMAIN": os.environ.get("FIREBASE_AUTH_DOMAIN"),
+        "FIREBASE_PROJECT_ID": os.environ.get("FIREBASE_PROJECT_ID"),
+        "FIREBASE_STORAGE_BUCKET": os.environ.get("FIREBASE_STORAGE_BUCKET"),
+        "FIREBASE_MESSAGING_SENDER_ID": os.environ.get("FIREBASE_MESSAGING_SENDER_ID"),
+        "FIREBASE_APP_ID": os.environ.get("FIREBASE_APP_ID"),
+        "FIREBASE_MEASUREMENT_ID": os.environ.get("FIREBASE_MEASUREMENT_ID"),
     }
+
+    # Firebase service account is sensitive — load from local JSON file
+    sa_path = ROOT / "data" / "firebase-admin.json"
+    if sa_path.exists():
+        secrets["FIREBASE_SERVICE_ACCOUNT_JSON"] = sa_path.read_text()
+        print(f"   Including FIREBASE_SERVICE_ACCOUNT_JSON ({sa_path.stat().st_size} bytes)")
     for name, value in secrets.items():
         if not value:
             print(f"   ⚠️  {name} not set, skipping")

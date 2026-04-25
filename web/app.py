@@ -30,6 +30,7 @@ from web.auth import (
     authenticate,
     clear_session,
     create_user,
+    find_user_by_email,
     get_current_user,
     init_users_table,
     issue_session,
@@ -144,6 +145,41 @@ def _mount_django_admin() -> None:
 _mount_django_admin()
 
 
+# ─── Firebase Admin (optional — verifies Google/Phone ID tokens) ──────
+_FIREBASE_INITIALIZED = False
+
+
+def _init_firebase() -> None:
+    """Initialize firebase_admin SDK from service-account JSON in env or local file."""
+    global _FIREBASE_INITIALIZED
+    if _FIREBASE_INITIALIZED:
+        return
+    try:
+        import firebase_admin
+        from firebase_admin import credentials
+
+        sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
+        if sa_json:
+            sa_dict = json.loads(sa_json)
+            cred = credentials.Certificate(sa_dict)
+        else:
+            local_path = ROOT.parent / "data" / "firebase-admin.json"
+            if local_path.exists():
+                cred = credentials.Certificate(str(local_path))
+            else:
+                print("Firebase: no service account configured — skipping init")
+                return
+
+        firebase_admin.initialize_app(cred)
+        _FIREBASE_INITIALIZED = True
+        print("   ✅ Firebase Admin initialized")
+    except Exception as e:
+        print(f"Firebase Admin init failed (non-fatal): {e}")
+
+
+_init_firebase()
+
+
 class SearchState:
     """Thread-shared runtime state for the search loop."""
 
@@ -238,6 +274,67 @@ async def api_me(user: dict | None = Depends(get_current_user)):
     if not user:
         return {"user": None}
     return {"user": {"id": user["id"], "email": user["email"], "name": user.get("name")}}
+
+
+@app.get("/api/auth/firebase-config")
+async def firebase_config():
+    """Public Firebase web SDK config."""
+    return {
+        "apiKey": os.environ.get("FIREBASE_API_KEY", ""),
+        "authDomain": os.environ.get("FIREBASE_AUTH_DOMAIN", ""),
+        "projectId": os.environ.get("FIREBASE_PROJECT_ID", ""),
+        "storageBucket": os.environ.get("FIREBASE_STORAGE_BUCKET", ""),
+        "messagingSenderId": os.environ.get("FIREBASE_MESSAGING_SENDER_ID", ""),
+        "appId": os.environ.get("FIREBASE_APP_ID", ""),
+        "measurementId": os.environ.get("FIREBASE_MEASUREMENT_ID", ""),
+    }
+
+
+class FirebaseLoginPayload(BaseModel):
+    id_token: str
+
+
+@app.post("/api/auth/firebase")
+async def firebase_login(payload: FirebaseLoginPayload, response: Response):
+    """Verify a Firebase ID token (Google sign-in or phone OTP) and create
+    or link a local user, then issue a session cookie."""
+    if not _FIREBASE_INITIALIZED:
+        raise HTTPException(503, "Firebase auth not configured on this server")
+
+    try:
+        from firebase_admin import auth as fb_auth
+        decoded = fb_auth.verify_id_token(payload.id_token)
+    except Exception as e:
+        raise HTTPException(401, f"Invalid Firebase token: {e}")
+
+    email = decoded.get("email") or f"{decoded['uid']}@firebase.local"
+    name = decoded.get("name", "") or decoded.get("phone_number", "")
+    provider = decoded.get("firebase", {}).get("sign_in_provider", "firebase")
+
+    existing = find_user_by_email(email)
+    if existing:
+        user_id = existing["id"]
+    else:
+        import uuid
+        import bcrypt
+        from web.auth import _connect, _placeholder
+        user_id = f"u_{uuid.uuid4().hex[:16]}"
+        # Random hash so this user can't log in via password flow until they reset
+        pw_hash = bcrypt.hashpw(uuid.uuid4().hex.encode(), bcrypt.gensalt(12)).decode("utf-8")
+        ph = _placeholder()
+        conn = _connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"INSERT INTO users (id, email, password_hash, name) VALUES ({ph},{ph},{ph},{ph})",
+                (user_id, email.lower(), pw_hash, name),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    issue_session(response, user_id)
+    return {"ok": True, "user": {"id": user_id, "email": email, "name": name, "provider": provider}}
 
 
 @app.get("/api/profile")

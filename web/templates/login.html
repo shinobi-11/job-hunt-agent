@@ -55,35 +55,130 @@
         <button type="submit" class="lg-btn primary big" style="width:100%; margin-top: 6px;">Log in →</button>
       </form>
 
+      <div style="display:flex;align-items:center;gap:12px;margin:20px 0">
+        <div style="flex:1;height:1px;background:rgba(15,23,42,0.1)"></div>
+        <span style="font-size:11px;color:var(--lg-text-dim);text-transform:uppercase;letter-spacing:0.08em">or</span>
+        <div style="flex:1;height:1px;background:rgba(15,23,42,0.1)"></div>
+      </div>
+
+      <button type="button" class="lg-btn" id="googleBtn" style="width:100%;justify-content:center;gap:10px">
+        <svg width="18" height="18" viewBox="0 0 18 18">
+          <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
+          <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>
+          <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/>
+          <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+        </svg>
+        Continue with Google
+      </button>
+
+      <button type="button" class="lg-btn" id="phoneBtn" style="width:100%;justify-content:center;gap:10px;margin-top:10px">
+        📱 Continue with Phone OTP
+      </button>
+
+      <div id="phoneFlow" hidden style="margin-top:16px;padding:14px;background:rgba(255,255,255,0.4);border-radius:12px">
+        <input id="phoneNumber" class="lg-input" type="tel" placeholder="+91 9999999999" />
+        <button type="button" class="lg-btn primary" id="sendOtpBtn" style="width:100%;margin-top:8px">Send OTP</button>
+        <div id="otpStep" hidden style="margin-top:10px">
+          <input id="otpCode" class="lg-input" type="text" placeholder="6-digit code" maxlength="6" />
+          <button type="button" class="lg-btn primary" id="verifyOtpBtn" style="width:100%;margin-top:8px">Verify & Login</button>
+        </div>
+      </div>
+      <div id="recaptcha-container"></div>
+
       <p class="alt">Don't have an account? <a href="/signup">Sign up free</a></p>
       <div id="authError" class="lg-auth-error" hidden></div>
     </div>
   </main>
 
-  <script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+    import {
+      getAuth, GoogleAuthProvider, signInWithPopup,
+      RecaptchaVerifier, signInWithPhoneNumber,
+    } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+
+    const errBox = document.getElementById("authError");
+    function showErr(msg) { errBox.textContent = msg; errBox.hidden = false; }
+
     document.getElementById("loginForm").onsubmit = async (e) => {
       e.preventDefault();
-      const errBox = document.getElementById("authError");
       errBox.hidden = true;
       const f = e.target;
-      const btn = f.querySelector("button");
+      const btn = f.querySelector("button[type='submit']");
       btn.disabled = true; btn.textContent = "Logging in…";
       try {
         const r = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
+          method: "POST", headers: {"Content-Type": "application/json"},
           body: JSON.stringify({email: f.email.value, password: f.password.value}),
         });
-        if (!r.ok) {
-          const err = await r.json();
-          throw new Error(err.detail || "Login failed");
-        }
+        if (!r.ok) { const err = await r.json(); throw new Error(err.detail || "Login failed"); }
         location.href = "/app";
-      } catch (e) {
-        errBox.textContent = e.message;
-        errBox.hidden = false;
-        btn.disabled = false; btn.textContent = "Log in →";
+      } catch (e) { showErr(e.message); btn.disabled = false; btn.textContent = "Log in →"; }
+    };
+
+    // ─── Firebase setup ───
+    let auth;
+    try {
+      const cfgResp = await fetch("/api/auth/firebase-config");
+      const cfg = await cfgResp.json();
+      if (cfg.apiKey) {
+        const fbApp = initializeApp(cfg);
+        auth = getAuth(fbApp);
+      } else {
+        document.getElementById("googleBtn").disabled = true;
+        document.getElementById("phoneBtn").disabled = true;
       }
+    } catch (e) {
+      console.warn("Firebase not configured:", e);
+    }
+
+    async function exchangeIdToken(idToken) {
+      const r = await fetch("/api/auth/firebase", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({id_token: idToken}),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || "Token exchange failed");
+      }
+      location.href = "/app";
+    }
+
+    // ─── Google sign-in ───
+    document.getElementById("googleBtn").onclick = async () => {
+      if (!auth) return showErr("Firebase not configured on this server");
+      try {
+        const result = await signInWithPopup(auth, new GoogleAuthProvider());
+        const idToken = await result.user.getIdToken();
+        await exchangeIdToken(idToken);
+      } catch (e) { showErr("Google sign-in failed: " + e.message); }
+    };
+
+    // ─── Phone OTP ───
+    let confirmationResult = null;
+    document.getElementById("phoneBtn").onclick = () => {
+      document.getElementById("phoneFlow").hidden = false;
+    };
+    document.getElementById("sendOtpBtn").onclick = async () => {
+      if (!auth) return showErr("Firebase not configured");
+      const phone = document.getElementById("phoneNumber").value.trim();
+      if (!phone.startsWith("+")) return showErr("Phone must start with country code (e.g., +91)");
+      try {
+        if (!window.recaptchaVerifier) {
+          window.recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {size: "invisible"});
+        }
+        confirmationResult = await signInWithPhoneNumber(auth, phone, window.recaptchaVerifier);
+        document.getElementById("otpStep").hidden = false;
+      } catch (e) { showErr("OTP send failed: " + e.message); }
+    };
+    document.getElementById("verifyOtpBtn").onclick = async () => {
+      if (!confirmationResult) return;
+      const code = document.getElementById("otpCode").value.trim();
+      try {
+        const result = await confirmationResult.confirm(code);
+        const idToken = await result.user.getIdToken();
+        await exchangeIdToken(idToken);
+      } catch (e) { showErr("Invalid OTP: " + e.message); }
     };
   </script>
 </body>

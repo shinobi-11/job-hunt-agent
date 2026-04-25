@@ -181,22 +181,27 @@ class JobDatabase:
 
             # Lazy migrations
             if self.is_postgres:
-                # Postgres: add user_id columns + drop old unique constraints if they exist
+                # Postgres: add columns idempotently. Order matters — drop old constraints
+                # before adding indexes that supersede them.
                 migrations = [
-                    ("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS user_id TEXT", []),
-                    ("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS user_id TEXT", []),
-                    ("ALTER TABLE applications ADD COLUMN IF NOT EXISTS user_id TEXT", []),
-                    ("ALTER TABLE match_scores ADD COLUMN IF NOT EXISTS user_id TEXT", []),
-                    # Drop the old globally-unique email constraint (different users can have same email field)
-                    ("ALTER TABLE profiles DROP CONSTRAINT IF EXISTS profiles_email_key", []),
-                    # Drop the old globally-unique URL constraint (now (user_id, url) is the dedup key)
-                    ("ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_url_key", []),
-                    # Composite unique on (user_id, url) so each user can have the same job
-                    ("CREATE UNIQUE INDEX IF NOT EXISTS jobs_user_url_uniq ON jobs (user_id, url)", []),
-                    # Unique profile per user
-                    ("CREATE UNIQUE INDEX IF NOT EXISTS profiles_user_uniq ON profiles (user_id)", []),
+                    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS user_id TEXT",
+                    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS current_salary REAL",
+                    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS hike_percent_min REAL DEFAULT 20",
+                    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS hike_percent_max REAL DEFAULT 40",
+                    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS salary_currency TEXT DEFAULT 'USD'",
+                    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS strict_salary_filter BOOLEAN DEFAULT TRUE",
+                    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS llm_provider TEXT DEFAULT 'gemini'",
+                    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS llm_api_key TEXT",
+                    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS llm_model TEXT",
+                    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS user_id TEXT",
+                    "ALTER TABLE applications ADD COLUMN IF NOT EXISTS user_id TEXT",
+                    "ALTER TABLE match_scores ADD COLUMN IF NOT EXISTS user_id TEXT",
+                    "ALTER TABLE profiles DROP CONSTRAINT IF EXISTS profiles_email_key",
+                    "ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_url_key",
+                    "CREATE UNIQUE INDEX IF NOT EXISTS jobs_user_url_uniq ON jobs (user_id, url)",
+                    "CREATE UNIQUE INDEX IF NOT EXISTS profiles_user_uniq ON profiles (user_id)",
                 ]
-                for sql, _ in migrations:
+                for sql in migrations:
                     try:
                         cur.execute(sql)
                     except Exception as e:

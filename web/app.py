@@ -14,6 +14,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, Up
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.types import Receive, Scope, Send
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -65,12 +66,67 @@ app = FastAPI(title="Job Hunt Agent", version="0.2.0")
 from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# Django collected static files (mounted at startup if collectstatic ran)
-DJANGO_STATIC = ROOT.parent / "admin_site" / "staticfiles"
-if DJANGO_STATIC.exists():
-    app.mount("/django/static", StaticFiles(directory=str(DJANGO_STATIC)), name="django-static")
+class _CachedStaticFiles(StaticFiles):
+    """StaticFiles + long-lived Cache-Control for versioned assets."""
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        async def _send(message):
+            if message["type"] == "http.response.start":
+                hdrs = [(k, v) for k, v in message.get("headers", [])
+                        if k.lower() != b"cache-control"]
+                hdrs.append((b"cache-control", b"public, max-age=31536000, immutable"))
+                message = {**message, "headers": hdrs}
+            await send(message)
+        await super().__call__(scope, receive, _send)
+
+
+app.mount("/static", _CachedStaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# ─── Django admin: lazy proxy (mounted sync) + background init ──────
+# Module-level WSGI app reference — written once by the init thread (GIL ensures
+# safe publish; readers see None until Django is ready).
+_django_wsgi_app = None
+
+
+class _LazyDjango:
+    """ASGI shim: returns 503 until Django is ready, then proxies to WSGI."""
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if _django_wsgi_app is None:
+            from starlette.responses import PlainTextResponse
+            await PlainTextResponse(
+                "Admin panel is initializing — please refresh in a few seconds.",
+                status_code=503,
+                headers={"Retry-After": "5"},
+            )(scope, receive, send)
+            return
+        from starlette.middleware.wsgi import WSGIMiddleware
+        await WSGIMiddleware(_django_wsgi_app)(scope, receive, send)
+
+
+# Lazy static files for django admin (handles case where collectstatic hasn't run yet)
+_django_static_app = None
+
+
+class _LazyDjangoStatic:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        global _django_static_app
+        if _django_static_app is None:
+            _DS = ROOT.parent / "admin_site" / "staticfiles"
+            if _DS.exists():
+                _django_static_app = StaticFiles(directory=str(_DS))
+            else:
+                from starlette.responses import PlainTextResponse
+                await PlainTextResponse("Static files not ready", status_code=503)(scope, receive, send)
+                return
+        await _django_static_app(scope, receive, send)
+
+
+# Mount both synchronously — routes registered before any request arrives.
+app.mount("/django/static", _LazyDjangoStatic(), name="django-static")
+app.mount("/django", _LazyDjango())
+
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
@@ -79,79 +135,57 @@ def _on_startup() -> None:
     init_users_table()
 
 
-# ─── Mount Django admin at /django ──────────────────────────────────
-def _mount_django_admin() -> None:
-    """Mount Django's admin app under /django so the same Space serves both."""
-    try:
-        import os as _os
-        import sys as _sys
-        from pathlib import Path as _Path
+# ─── Django admin: background init thread ───────────────────────────
+def _init_django() -> None:
+    """Set up Django in a background thread so FastAPI starts immediately.
 
-        _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+    Writes _django_wsgi_app once ready — the _LazyDjango proxy above reads it.
+    Never calls app.mount() from this thread; all mounts happen synchronously above.
+    """
+    global _django_wsgi_app
+    import os as _os
+    import sys as _sys
+    try:
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         _os.environ.setdefault("DJANGO_SETTINGS_MODULE", "admin_site.settings")
 
-        import django  # noqa: E402
+        import django
         django.setup()
 
-        # Auto-migrate Django meta tables (auth, sessions) on startup
         try:
-            from django.core.management import call_command  # noqa: E402
-            # On HF (Postgres), default and django_meta point at same DB; migrate both
+            from django.core.management import call_command
             call_command("migrate", "--database=django_meta", "--noinput", verbosity=0)
-            if _os.environ.get("DATABASE_URL", "").startswith(("postgres://", "postgresql://")):
-                # On Postgres, default DB also needs the auth/sessions tables
-                # because we route them via DjangoMetaRouter to django_meta which == default here.
-                # Migration above handled it.
-                pass
         except Exception as e:
-            print(f"Django auto-migrate failed (non-fatal): {e}")
+            print(f"Django migrate failed (non-fatal): {e}")
 
-        # Collect static files so /django/static/* serves admin CSS/JS
         try:
-            from django.core.management import call_command  # noqa: E402,F811
+            from django.core.management import call_command  # noqa: F811
             call_command("collectstatic", "--noinput", verbosity=0)
         except Exception as e:
             print(f"Django collectstatic failed (non-fatal): {e}")
 
-        # Re-mount static if collectstatic just produced the directory
         try:
-            _DS = ROOT.parent / "admin_site" / "staticfiles"
-            _already = any(
-                getattr(r, "name", None) == "django-static" or
-                getattr(r, "path", "").rstrip("/") == "/django/static"
-                for r in app.routes
-            )
-            if _DS.exists() and not _already:
-                app.mount("/django/static", StaticFiles(directory=str(_DS)), name="django-static")
-        except Exception as e:
-            print(f"Django static re-mount failed (non-fatal): {e}")
-
-        # Auto-create superuser if env vars provided
-        try:
-            from django.contrib.auth import get_user_model  # noqa: E402
+            from django.contrib.auth import get_user_model
             U = get_user_model()
-            admin_user = _os.environ.get("ADMIN_USER", "admin")
-            admin_pw = _os.environ.get("ADMIN_PASS", "changeme123")
-            admin_email = _os.environ.get("ADMIN_EMAIL", "admin@example.com")
-            if not U.objects.using("django_meta").filter(username=admin_user).exists():
-                u = U(username=admin_user, email=admin_email, is_staff=True, is_superuser=True)
-                u.set_password(admin_pw)
+            au = _os.environ.get("ADMIN_USER", "admin")
+            ap = _os.environ.get("ADMIN_PASS", "changeme123")
+            ae = _os.environ.get("ADMIN_EMAIL", "admin@example.com")
+            if not U.objects.using("django_meta").filter(username=au).exists():
+                u = U(username=au, email=ae, is_staff=True, is_superuser=True)
+                u.set_password(ap)
                 u.save(using="django_meta")
-                print(f"   Django superuser '{admin_user}' created")
+                print(f"   Django superuser '{au}' created")
         except Exception as e:
             print(f"Django superuser bootstrap failed (non-fatal): {e}")
 
-        from django.core.wsgi import get_wsgi_application  # noqa: E402
-        from starlette.middleware.wsgi import WSGIMiddleware  # noqa: E402
-
-        django_app = get_wsgi_application()
-        app.mount("/django", WSGIMiddleware(django_app))
-        print("   ✅ Django admin mounted at /django")
+        from django.core.wsgi import get_wsgi_application
+        _django_wsgi_app = get_wsgi_application()
+        print("   ✅ Django admin ready at /django")
     except Exception as e:
-        print(f"Django mount failed (non-fatal): {e}")
+        print(f"Django init failed (non-fatal): {e}")
 
 
-_mount_django_admin()
+threading.Thread(target=_init_django, daemon=True).start()
 
 
 # ─── Firebase Admin (optional — verifies Google/Phone ID tokens) ──────

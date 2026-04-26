@@ -179,88 +179,39 @@
 
     <!-- SETTINGS PANEL -->
     <section id="panel-settings" class="lg-panel" hidden>
-      <div class="lg-card lg-glow" style="padding:32px">
-        <h2 style="margin:0 0 6px;font-size:22px;font-weight:800;color:var(--lg-text)">Profile Settings</h2>
-        <p style="margin:0 0 24px;color:var(--lg-text-dim);font-size:14px">All changes save to your account.</p>
+      <div style="display:flex;flex-direction:column;gap:20px">
 
-        <form id="profileForm">
-          <div class="lg-grid cols-2">
-            <div><label class="lg-label">Name</label><input class="lg-input" name="name" required/></div>
-            <div><label class="lg-label">Email</label><input class="lg-input" name="email" type="email" required/></div>
-            <div><label class="lg-label">Current Role</label><input class="lg-input" name="current_role"/></div>
-            <div><label class="lg-label">Years of Experience</label><input class="lg-input" name="years_experience" type="number" min="0" max="60"/></div>
+        <!-- ① Resume Upload -->
+        <div class="lg-card lg-glow" style="padding:28px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+            <span style="font-size:22px">📄</span>
+            <h2 style="margin:0;font-size:18px;font-weight:800;color:var(--lg-text)">Resume</h2>
+          </div>
+          <p style="margin:0 0 16px;color:var(--lg-text-dim);font-size:13px">Upload first. Once your API key is saved the profile will autofill automatically.</p>
+
+          <div id="resumeInfo" style="padding:12px 16px;background:rgba(255,255,255,0.4);border-radius:10px;margin-bottom:14px;font-size:14px;color:var(--lg-text-2)">
+            <span style="color:var(--lg-text-dim)">No resume uploaded yet.</span>
           </div>
 
-          <div style="margin-top:14px">
-            <label class="lg-label">Desired Jobs (comma-separated)</label>
-            <input class="lg-input" name="desired_roles" required placeholder="Financial Analyst, Investment Associate"/>
+          <form id="resumeForm" enctype="multipart/form-data" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <input class="lg-input" type="file" name="file" accept=".pdf,.docx,.doc" required style="flex:1;padding:8px"/>
+            <button type="submit" class="lg-btn primary">📄 Upload Resume</button>
+          </form>
+          <div style="margin-top:12px">
+            <button type="button" class="lg-btn" id="reAutofillBtn" style="background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;border:none">✨ Re-autofill from Resume</button>
+            <span id="autofillStatus" style="margin-left:12px;font-size:13px;color:var(--lg-text-dim)"></span>
           </div>
+        </div>
 
-          <div style="margin-top:14px">
-            <label class="lg-label">Desired Locations (comma-separated)</label>
-            <input class="lg-input" name="preferred_locations" required placeholder="Bangalore, Gurugram, Remote"/>
+        <!-- ② AI Provider -->
+        <div class="lg-card lg-glow" style="padding:28px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+            <span style="font-size:22px">🤖</span>
+            <h2 style="margin:0;font-size:18px;font-weight:800;color:var(--lg-text)">AI Provider</h2>
           </div>
+          <p style="margin:0 0 18px;color:var(--lg-text-dim);font-size:13px">Pick any LLM provider — switch keys anytime to dodge rate limits.</p>
 
-          <div style="margin-top:14px">
-            <label class="lg-label">Skills (comma-separated)</label>
-            <input class="lg-input" name="skills" placeholder="Power BI, DCF Valuation, Excel"/>
-          </div>
-
-          <div class="lg-grid cols-3" style="margin-top:14px">
-            <div>
-              <label class="lg-label">Remote Preference</label>
-              <select class="lg-select" name="remote_preference">
-                <option value="any">Any</option><option value="remote">Remote</option>
-                <option value="hybrid">Hybrid</option><option value="on-site">On-site</option>
-              </select>
-            </div>
-            <div>
-              <label class="lg-label">Currency</label>
-              <select class="lg-select" name="salary_currency">
-                <option>USD</option><option>INR</option><option>EUR</option><option>GBP</option>
-              </select>
-            </div>
-            <div>
-              <label class="lg-label">Current Annual Salary</label>
-              <input class="lg-input" name="current_salary" type="number" min="0" required/>
-            </div>
-          </div>
-
-          <div class="lg-grid cols-2" style="margin-top:14px">
-            <div>
-              <label class="lg-label">Min Expected Hike %</label>
-              <input class="lg-input" name="hike_percent_min" type="number" min="0" max="200" value="20" required/>
-            </div>
-            <div>
-              <label class="lg-label">Max Expected Hike %</label>
-              <input class="lg-input" name="hike_percent_max" type="number" min="0" max="500" value="40" required/>
-            </div>
-          </div>
-
-          <div id="salaryPreview" hidden style="margin-top:14px;padding:14px 18px;border-radius:12px;
-               background:rgba(34,197,94,0.1);border-left:3px solid #16a34a;font-size:14px;color:var(--lg-text-2)">
-            <strong>Expected Salary Range:</strong> <span id="salaryRangeText"></span>
-          </div>
-
-          <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:18px">
-            <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--lg-text-2)">
-              <input type="checkbox" name="willing_to_relocate"/> Willing to relocate
-            </label>
-            <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--lg-text-2)">
-              <input type="checkbox" name="auto_apply_enabled" checked/> Auto-apply on safe sources (≥85)
-            </label>
-            <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--lg-text-2)">
-              <input type="checkbox" name="strict_salary_filter" checked/> Strict salary filter
-            </label>
-          </div>
-          <p style="margin-top:10px;padding:12px 14px;background:rgba(234,179,8,0.08);border-left:3px solid #ea580c;border-radius:8px;font-size:12px;color:var(--lg-text-2);line-height:1.5">
-            <strong>About auto-apply:</strong> Only runs on RemoteOK / Remotive / Jobicy / Himalayas / Arbeitnow / Working Nomads / WWR / USAJobs (safe).
-            <strong>LinkedIn / Naukri / iimjobs / Instahyre are NEVER auto-submitted</strong> — they require login + violate ToS, so they're queued for you to apply manually with one click.
-          </p>
-
-          <fieldset style="margin-top:22px;padding:18px 22px;border-radius:14px;border:1px solid rgba(139,92,246,0.25);background:rgba(139,92,246,0.05)">
-            <legend style="padding:2px 10px;font-weight:700;font-size:13px;color:#7c3aed">🤖 AI Provider</legend>
-            <p style="margin:6px 0 14px;font-size:12px;color:var(--lg-text-dim)">Pick any LLM provider — switch keys anytime to dodge rate limits.</p>
+          <form id="profileForm" style="display:contents">
             <div class="lg-grid cols-2">
               <div>
                 <label class="lg-label">Provider</label>
@@ -276,6 +227,7 @@
                 <input class="lg-input" name="llm_api_key" type="password" autocomplete="off" id="apiKeyInput" placeholder="Paste your key"/>
               </div>
             </div>
+
             <div style="margin-top:14px">
               <label class="lg-label">
                 Model
@@ -288,31 +240,97 @@
                 Click "Discover available models" after pasting an API key to see what your key has access to.
               </p>
             </div>
-            <p id="providerHint" style="margin-top:10px;font-size:12px;color:var(--lg-text-dim)"></p>
-          </fieldset>
+            <p id="providerHint" style="margin-top:8px;font-size:12px;color:var(--lg-text-dim)"></p>
+          </form>
+        </div>
 
-          <div style="display:flex;justify-content:flex-end;margin-top:18px">
-            <button type="submit" class="lg-btn primary big">💾 Save Profile</button>
+        <!-- ③ Profile Details -->
+        <div class="lg-card lg-glow" style="padding:28px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+            <span style="font-size:22px">👤</span>
+            <h2 style="margin:0;font-size:18px;font-weight:800;color:var(--lg-text)">Profile Details</h2>
           </div>
-        </form>
+          <p style="margin:0 0 20px;color:var(--lg-text-dim);font-size:13px">Your job preferences and salary expectations.</p>
 
-        <hr style="margin:32px 0;border:none;border-top:1px solid rgba(15,23,42,0.08)"/>
+          <div class="lg-grid cols-2">
+            <div><label class="lg-label">Name</label><input class="lg-input" name="name" form="profileForm" required/></div>
+            <div><label class="lg-label">Email</label><input class="lg-input" name="email" type="email" form="profileForm" required/></div>
+            <div><label class="lg-label">Current Role</label><input class="lg-input" name="current_role" form="profileForm"/></div>
+            <div><label class="lg-label">Years of Experience</label><input class="lg-input" name="years_experience" type="number" min="0" max="60" form="profileForm"/></div>
+          </div>
 
-        <h3 style="margin:0 0 12px;font-size:18px;font-weight:700;color:var(--lg-text)">Resume</h3>
-        <div id="resumeInfo" style="padding:14px 18px;background:rgba(255,255,255,0.4);border-radius:10px;margin-bottom:14px;font-size:14px;color:var(--lg-text-2)">
-          <span style="color:var(--lg-text-dim)">No resume uploaded yet.</span>
+          <div style="margin-top:14px">
+            <label class="lg-label">Desired Jobs (comma-separated)</label>
+            <input class="lg-input" name="desired_roles" form="profileForm" required placeholder="Financial Analyst, Investment Associate"/>
+          </div>
+
+          <div style="margin-top:14px">
+            <label class="lg-label">Desired Locations (comma-separated)</label>
+            <input class="lg-input" name="preferred_locations" form="profileForm" required placeholder="Bangalore, Gurugram, Remote"/>
+          </div>
+
+          <div style="margin-top:14px">
+            <label class="lg-label">Skills (comma-separated)</label>
+            <input class="lg-input" name="skills" form="profileForm" placeholder="Power BI, DCF Valuation, Excel"/>
+          </div>
+
+          <div class="lg-grid cols-3" style="margin-top:14px">
+            <div>
+              <label class="lg-label">Remote Preference</label>
+              <select class="lg-select" name="remote_preference" form="profileForm">
+                <option value="any">Any</option><option value="remote">Remote</option>
+                <option value="hybrid">Hybrid</option><option value="on-site">On-site</option>
+              </select>
+            </div>
+            <div>
+              <label class="lg-label">Currency</label>
+              <select class="lg-select" name="salary_currency" form="profileForm">
+                <option>USD</option><option>INR</option><option>EUR</option><option>GBP</option>
+              </select>
+            </div>
+            <div>
+              <label class="lg-label">Current Annual Salary</label>
+              <input class="lg-input" name="current_salary" type="number" min="0" form="profileForm" required/>
+            </div>
+          </div>
+
+          <div class="lg-grid cols-2" style="margin-top:14px">
+            <div>
+              <label class="lg-label">Min Expected Hike %</label>
+              <input class="lg-input" name="hike_percent_min" type="number" min="0" max="200" value="20" form="profileForm" required/>
+            </div>
+            <div>
+              <label class="lg-label">Max Expected Hike %</label>
+              <input class="lg-input" name="hike_percent_max" type="number" min="0" max="500" value="40" form="profileForm" required/>
+            </div>
+          </div>
+
+          <div id="salaryPreview" hidden style="margin-top:14px;padding:14px 18px;border-radius:12px;
+               background:rgba(34,197,94,0.1);border-left:3px solid #16a34a;font-size:14px;color:var(--lg-text-2)">
+            <strong>Expected Salary Range:</strong> <span id="salaryRangeText"></span>
+          </div>
+
+          <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:18px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--lg-text-2)">
+              <input type="checkbox" name="willing_to_relocate" form="profileForm"/> Willing to relocate
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--lg-text-2)">
+              <input type="checkbox" name="auto_apply_enabled" form="profileForm" checked/> Auto-apply on safe sources (≥85)
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--lg-text-2)">
+              <input type="checkbox" name="strict_salary_filter" form="profileForm" checked/> Strict salary filter
+            </label>
+          </div>
+          <p style="margin-top:10px;padding:12px 14px;background:rgba(234,179,8,0.08);border-left:3px solid #ea580c;border-radius:8px;font-size:12px;color:var(--lg-text-2);line-height:1.5">
+            <strong>About auto-apply:</strong> Only runs on RemoteOK / Remotive / Jobicy / Himalayas / Arbeitnow / Working Nomads / WWR / USAJobs (safe).
+            <strong>LinkedIn / Naukri / iimjobs / Instahyre are NEVER auto-submitted</strong> — they require login + violate ToS, so they're queued for you to apply manually with one click.
+          </p>
+
+          <div style="display:flex;justify-content:flex-end;margin-top:22px">
+            <button type="submit" form="profileForm" class="lg-btn primary big">💾 Save Profile</button>
+          </div>
         </div>
-        <p style="font-size:12px;color:var(--lg-text-dim);margin-bottom:10px">
-          Upload your resume (PDF or DOCX). Save your AI API key first — the profile will be autofilled automatically.
-        </p>
-        <form id="resumeForm" enctype="multipart/form-data" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-          <input class="lg-input" type="file" name="file" accept=".pdf,.docx,.doc" required style="flex:1;padding:8px"/>
-          <button type="submit" class="lg-btn primary">📄 Upload Resume</button>
-        </form>
-        <div style="margin-top:12px">
-          <button type="button" class="lg-btn" id="reAutofillBtn" style="background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;border:none">✨ Re-autofill from Resume</button>
-          <span id="autofillStatus" style="margin-left:12px;font-size:13px;color:var(--lg-text-dim)"></span>
-        </div>
+
       </div>
     </section>
   </main>

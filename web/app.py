@@ -441,10 +441,8 @@ async def discover_models(payload: ListModelsPayload, user: dict = Depends(requi
         raise HTTPException(400, "Provide an API key (or save one to your profile first)")
 
     try:
-        models = await asyncio.wait_for(list_models_async(payload.provider, key), timeout=12.0)
+        models = await list_models_async(payload.provider, key)
         return {"models": models, "default": PROVIDERS[payload.provider]["default_model"]}
-    except asyncio.TimeoutError:
-        raise HTTPException(504, "Provider didn't respond in 12s — key may be invalid. Try again or use the default model.")
     except Exception as e:
         msg = str(e)
         if "expired" in msg.lower() or "invalid" in msg.lower() or "API_KEY_INVALID" in msg:

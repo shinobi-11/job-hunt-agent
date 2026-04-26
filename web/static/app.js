@@ -217,16 +217,12 @@ async function discoverModels() {
   btn.disabled = true; btn.textContent = "Discovering…";
   $("#modelHint").textContent = "Querying provider for available models…";
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 13000);
   try {
     const r = await fetch(`${API}/api/llm/models`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({provider, api_key: apiKey}),
-      signal: controller.signal,
     });
-    clearTimeout(timer);
     if (!r.ok) {
       const err = await r.json();
       throw new Error(err.detail || "Discovery failed");
@@ -243,10 +239,8 @@ async function discoverModels() {
     $("#modelHint").innerHTML = `Found <strong>${models.length}</strong> models. Default: <code>${defaultModel}</code>. ★ = recommended.`;
     toast(`Found ${models.length} models for ${provider}`);
   } catch (e) {
-    clearTimeout(timer);
-    const msg = e.name === "AbortError" ? "Request timed out — check your API key and try again" : e.message;
-    $("#modelHint").innerHTML = `<span style="color:#dc2626">${escapeHtml(msg)}</span>`;
-    toast("Discovery failed: " + msg, "error");
+    $("#modelHint").innerHTML = `<span style="color:#dc2626">${escapeHtml(e.message)}</span>`;
+    toast("Discovery failed: " + e.message, "error");
   } finally {
     btn.disabled = false; btn.textContent = "Discover available models";
   }

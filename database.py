@@ -200,6 +200,8 @@ class JobDatabase:
                     "ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_url_key",
                     "CREATE UNIQUE INDEX IF NOT EXISTS jobs_user_url_uniq ON jobs (user_id, url)",
                     "CREATE UNIQUE INDEX IF NOT EXISTS profiles_user_uniq ON profiles (user_id)",
+                    "CREATE INDEX IF NOT EXISTS applications_user_score_idx ON applications (user_id, match_score DESC)",
+                    "CREATE INDEX IF NOT EXISTS applications_user_status_idx ON applications (user_id, status)",
                 ]
                 for sql in migrations:
                     try:
@@ -228,6 +230,8 @@ class JobDatabase:
                     cols = {row[1] for row in cur.fetchall()}
                     if "user_id" not in cols:
                         cur.execute(f"ALTER TABLE {table} ADD COLUMN user_id TEXT")
+                cur.execute("CREATE INDEX IF NOT EXISTS applications_user_score_idx ON applications (user_id, match_score DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS applications_user_status_idx ON applications (user_id, status)")
 
     # ─── Jobs ────────────────────────────────────────────────────
 
@@ -450,22 +454,34 @@ class JobDatabase:
             print(f"Error retrieving profile: {e}")
             return None
 
-    def get_applications(self, user_id: str | None = None, status: str | None = None) -> list[Application]:
+    def get_applications(
+        self,
+        user_id: str | None = None,
+        status: str | None = None,
+        min_score: int | None = None,
+        app_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[Application]:
         if not user_id:
             return []
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
+                clauses = ["user_id = ?"]
+                params: list = [user_id]
+                if app_id:
+                    clauses.append("id = ?")
+                    params.append(app_id)
                 if status:
-                    cur.execute(
-                        self._q("SELECT * FROM applications WHERE user_id = ? AND status = ? ORDER BY created_at DESC"),
-                        (user_id, status),
-                    )
-                else:
-                    cur.execute(
-                        self._q("SELECT * FROM applications WHERE user_id = ? ORDER BY created_at DESC"),
-                        (user_id,),
-                    )
+                    clauses.append("status = ?")
+                    params.append(status)
+                if min_score is not None:
+                    clauses.append("(match_score IS NULL OR match_score >= ?)")
+                    params.append(min_score)
+                sql = f"SELECT * FROM applications WHERE {' AND '.join(clauses)} ORDER BY created_at DESC"
+                if limit:
+                    sql += f" LIMIT {int(limit)}"
+                cur.execute(self._q(sql), params)
 
                 colnames = [d[0] for d in cur.description]
                 apps = []
@@ -488,23 +504,24 @@ class JobDatabase:
 
     def get_stats(self, user_id: str | None = None) -> dict:
         if not user_id:
-            return {"total_jobs": 0, "total_applications": 0, "auto_applied": 0}
+            return {"total_jobs": 0, "total_applications": 0, "auto_applied": 0, "pending": 0, "manual_flag": 0}
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
                 cur.execute(self._q("SELECT COUNT(*) FROM jobs WHERE user_id = ?"), (user_id,))
                 jobs_count = cur.fetchone()[0]
-                cur.execute(self._q("SELECT COUNT(*) FROM applications WHERE user_id = ?"), (user_id,))
-                apps_count = cur.fetchone()[0]
+                # Single query: count per status
                 cur.execute(
-                    self._q("SELECT COUNT(*) FROM applications WHERE user_id = ? AND status = ?"),
-                    (user_id, ApplicationStatus.AUTO_APPLIED.value),
+                    self._q("SELECT status, COUNT(*) FROM applications WHERE user_id = ? GROUP BY status"),
+                    (user_id,),
                 )
-                auto = cur.fetchone()[0]
+                counts = {row[0]: row[1] for row in cur.fetchall()}
                 return {
                     "total_jobs": jobs_count,
-                    "total_applications": apps_count,
-                    "auto_applied": auto,
+                    "total_applications": sum(counts.values()),
+                    "auto_applied": counts.get(ApplicationStatus.AUTO_APPLIED.value, 0),
+                    "pending": counts.get(ApplicationStatus.PENDING.value, 0),
+                    "manual_flag": counts.get(ApplicationStatus.MANUAL_FLAG.value, 0),
                 }
         except Exception as e:
             print(f"Error getting stats: {e}")

@@ -106,7 +106,7 @@ async function updateStatus() {
     drawSparkline("sparkJobs", jobsHistory);
   } catch (e) { console.error(e); }
 }
-setInterval(updateStatus, 2500);
+setInterval(updateStatus, 5000);
 updateStatus();
 
 // ─── Controls ───
@@ -217,12 +217,16 @@ async function discoverModels() {
   btn.disabled = true; btn.textContent = "Discovering…";
   $("#modelHint").textContent = "Querying provider for available models…";
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
   try {
     const r = await fetch(`${API}/api/llm/models`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({provider, api_key: apiKey}),
+      signal: controller.signal,
     });
+    clearTimeout(timer);
     if (!r.ok) {
       const err = await r.json();
       throw new Error(err.detail || "Discovery failed");
@@ -239,14 +243,26 @@ async function discoverModels() {
     $("#modelHint").innerHTML = `Found <strong>${models.length}</strong> models. Default: <code>${defaultModel}</code>. ★ = recommended.`;
     toast(`Found ${models.length} models for ${provider}`);
   } catch (e) {
-    $("#modelHint").innerHTML = `<span style="color:#dc2626">${escapeHtml(e.message)}</span>`;
-    toast("Discovery failed: " + e.message, "error");
+    clearTimeout(timer);
+    const msg = e.name === "AbortError" ? "Request timed out — check your API key and try again" : e.message;
+    $("#modelHint").innerHTML = `<span style="color:#dc2626">${escapeHtml(msg)}</span>`;
+    toast("Discovery failed: " + msg, "error");
   } finally {
     btn.disabled = false; btn.textContent = "Discover available models";
   }
 }
 document.addEventListener("click", e => {
   if (e.target.id === "discoverModelsBtn") discoverModels();
+  if (e.target.id === "reAutofillBtn") {
+    const btn = e.target;
+    const status = $("#autofillStatus");
+    btn.disabled = true; btn.textContent = "Autofilling…";
+    if (status) status.textContent = "Parsing resume with AI…";
+    triggerAutofill().finally(() => {
+      btn.disabled = false; btn.textContent = "✨ Re-autofill from Resume";
+      if (status) status.textContent = "";
+    });
+  }
 });
 
 // ─── Profile view ───
@@ -256,7 +272,13 @@ function paintProfile(profile) {
   const view = $("#profileView");
   if (!view) return;
   if (!profile) {
-    view.innerHTML = `<p style="color:var(--lg-text-dim)">No profile yet. Open Settings to create one.</p>`;
+    view.innerHTML = `
+      <div style="padding:32px;text-align:center;color:var(--lg-text-dim)">
+        <div style="font-size:2rem;margin-bottom:12px">👤</div>
+        <div style="font-weight:600;margin-bottom:8px">No profile yet</div>
+        <div style="font-size:13px;margin-bottom:16px">Upload your resume and add an API key in Settings — your profile will be autofilled automatically.</div>
+        <button class="lg-btn" onclick="activatePanel('settings')">Go to Settings →</button>
+      </div>`;
     return;
   }
   const rows = [
@@ -426,8 +448,19 @@ $("#profileForm").onsubmit = async (e) => {
   });
   if (r.ok) {
     toast("Profile saved");
-    profileCache = null;  // invalidate cache so re-render shows the saved data
+    profileCache = null;
     renderProfile();
+
+    // If user just saved an API key and has a resume, auto-run autofill
+    const hadKey = !!(payload.llm_api_key && payload.llm_api_key.length >= 4);
+    if (hadKey) {
+      const resumeRes = await fetch(`${API}/api/resume`);
+      const resumeInfo = await resumeRes.json();
+      if (resumeInfo.exists) {
+        toast("API key saved — running resume autofill…", "success");
+        await triggerAutofill();
+      }
+    }
   } else {
     toast("Save failed", "error");
   }
@@ -451,26 +484,67 @@ $("#resumeForm").onsubmit = async (e) => {
 
     // Apply AI-suggested profile fields if returned
     if (info.suggested_profile) {
-      // First switch to settings, fill form, then re-paint
       activatePanel("settings");
-      // Wait one tick for the panel to be visible before filling
-      await new Promise(r => setTimeout(r, 50));
-      applySuggestedProfile(info.suggested_profile);
-      toast("✨ Profile fields auto-filled from resume — review and click Save", "success");
+      await new Promise(resolve => setTimeout(resolve, 80));
+      await fillSettingsForm();
+      applyAllSuggestedProfile(info.suggested_profile);
+      toast("✨ Profile autofilled from resume — review and click Save", "success");
     } else if (info.autofill_status === "no_api_key") {
-      toast("Resume uploaded. Add an LLM API key in Settings to auto-fill the form next time", "warning");
-      fillSettingsForm();
+      toast("Resume saved. Add your AI API key below then click Save — autofill will run automatically.", "warning");
+      activatePanel("settings");
+      await fillSettingsForm();
     } else if (info.autofill_status === "ai_timeout") {
-      toast("Resume uploaded but AI autofill timed out — fill the form manually", "warning");
-      fillSettingsForm();
+      toast("Resume uploaded — AI timed out. Click ✨ Autofill from Resume after saving your key.", "warning");
+      activatePanel("settings");
+      await fillSettingsForm();
     } else {
-      toast(`Resume uploaded. AI autofill: ${info.autofill_status || "skipped"}`, "warning");
-      fillSettingsForm();
+      toast(`Resume saved. Status: ${info.autofill_status || "skipped"}`, "warning");
+      activatePanel("settings");
+      await fillSettingsForm();
     }
   } finally {
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "📄 Upload Resume"; }
   }
 };
+
+async function triggerAutofill() {
+  try {
+    const r = await fetch(`${API}/api/resume/autofill`, { method: "POST" });
+    const data = await r.json();
+    if (!r.ok) {
+      toast(data.detail || "Autofill failed", "error");
+      return;
+    }
+    if (data.suggested_profile) {
+      activatePanel("settings");
+      await new Promise(resolve => setTimeout(resolve, 80));
+      await fillSettingsForm();
+      applyAllSuggestedProfile(data.suggested_profile);
+      toast("✨ Profile autofilled from resume — review and click Save", "success");
+    }
+  } catch (e) {
+    toast("Autofill error: " + e.message, "error");
+  }
+}
+
+function applyAllSuggestedProfile(s) {
+  const f = $("#profileForm");
+  if (!f) return;
+  const set = (name, value) => {
+    if (!f[name] || value == null) return;
+    const v = Array.isArray(value) ? value.join(", ") : String(value);
+    if (v) f[name].value = v;
+  };
+  set("name", s.name);
+  set("email", s.email);
+  set("current_role", s.current_role);
+  set("years_experience", s.years_experience);
+  set("desired_roles", s.desired_roles);
+  set("preferred_locations", s.preferred_locations);
+  set("skills", s.skills);
+  if (s.remote_preference && f.remote_preference) f.remote_preference.value = s.remote_preference;
+  f.scrollIntoView?.({ behavior: "smooth", block: "start" });
+}
 
 function applySuggestedProfile(s) {
   const f = $("#profileForm");

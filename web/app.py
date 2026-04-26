@@ -207,13 +207,25 @@ class SearchState:
 
 STATE = SearchState()
 
+_CFG = None
+_DB_INSTANCE: JobDatabase | None = None
+_DB_LOCK = threading.Lock()
+
 
 def _cfg():
-    return get_config()
+    global _CFG
+    if _CFG is None:
+        _CFG = get_config()
+    return _CFG
 
 
 def _db() -> JobDatabase:
-    return JobDatabase(db_path=_cfg().database_path)
+    global _DB_INSTANCE
+    if _DB_INSTANCE is None:
+        with _DB_LOCK:
+            if _DB_INSTANCE is None:
+                _DB_INSTANCE = JobDatabase(db_path=_cfg().database_path)
+    return _DB_INSTANCE
 
 
 @app.get("/")
@@ -592,6 +604,62 @@ async def get_resume_info(user: dict = Depends(require_user)):
     }
 
 
+@app.post("/api/resume/autofill")
+async def resume_autofill(user: dict = Depends(require_user)):
+    """Re-run AI autofill on the already-uploaded resume using the saved API key."""
+    resume_path = _find_user_resume(user["id"])
+    if not resume_path:
+        raise HTTPException(400, "No resume uploaded yet — upload one first")
+
+    profile = _db().get_profile(user_id=user["id"])
+    api_key = profile.llm_api_key if profile else None
+    if not api_key or len(api_key) < 20:
+        raise HTTPException(400, "No API key saved — save your AI Provider settings first")
+
+    try:
+        text = ResumeParser.parse_resume(str(resume_path))
+    except Exception as e:
+        raise HTTPException(400, f"Resume parse failed: {e}")
+
+    if not text or len(text.strip()) < 50:
+        raise HTTPException(400, "Resume text too short — try re-uploading as a text-based PDF/DOCX")
+
+    provider = (profile.llm_provider if profile else None) or "gemini"
+    model = profile.llm_model if profile else None
+
+    try:
+        from profile_builder import ProfileBuilder
+        built = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: ProfileBuilder(api_key=api_key, provider=provider, model_name=model)
+                        .build_from_resume(text)
+            ),
+            timeout=30.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "AI autofill timed out — try again")
+    except Exception as e:
+        raise HTTPException(500, f"AI autofill failed: {str(e)[:120]}")
+
+    if not built:
+        raise HTTPException(422, "AI could not parse profile from resume — check the key is valid and the resume has enough text")
+
+    suggested = {
+        "name": built.name,
+        "email": built.email if "@" in built.email and "firebase.local" not in built.email
+                 else (profile.email if profile else None),
+        "current_role": built.current_role,
+        "years_experience": built.years_experience,
+        "desired_roles": built.desired_roles,
+        "skills": built.skills,
+        "industries": built.industries,
+        "preferred_locations": built.preferred_locations,
+        "remote_preference": built.remote_preference,
+        "company_size_preference": built.company_size_preference,
+    }
+    return {"ok": True, "suggested_profile": suggested}
+
+
 @app.delete("/api/resume")
 async def delete_resume(user: dict = Depends(require_user)):
     p = _find_user_resume(user["id"])
@@ -612,13 +680,8 @@ async def get_status(user: dict | None = Depends(get_current_user)):
     db = _db()
     if user:
         stats = db.get_stats(user_id=user["id"])
-        apps = db.get_applications(user_id=user["id"])
     else:
-        stats = {"total_jobs": 0}
-        apps = []
-    auto = sum(1 for a in apps if a.status == ApplicationStatus.AUTO_APPLIED)
-    semi = sum(1 for a in apps if a.status == ApplicationStatus.PENDING)
-    manual = sum(1 for a in apps if a.status == ApplicationStatus.MANUAL_FLAG)
+        stats = {"total_jobs": 0, "auto_applied": 0, "pending": 0, "manual_flag": 0}
     elapsed = 0
     if STATE.started_at:
         elapsed = int((datetime.now() - STATE.started_at).total_seconds())
@@ -629,9 +692,9 @@ async def get_status(user: dict | None = Depends(get_current_user)):
         "cycle": STATE.cycle,
         "elapsed_seconds": elapsed,
         "total_jobs": stats.get("total_jobs", 0),
-        "auto_applied": auto,
-        "semi_auto": semi,
-        "manual_flag": manual,
+        "auto_applied": stats.get("auto_applied", 0),
+        "semi_auto": stats.get("pending", 0),
+        "manual_flag": stats.get("manual_flag", 0),
     }
 
 
@@ -697,8 +760,7 @@ async def list_applications(
     user: dict = Depends(require_user),
 ):
     """Returns applications with match_score >= min_score (default 51) for current user."""
-    apps = _db().get_applications(user_id=user["id"], status=status)
-    apps = [a for a in apps if (a.match_score or 0) >= min_score]
+    apps = _db().get_applications(user_id=user["id"], status=status, min_score=min_score)
     return {"applications": [a.model_dump(mode="json") for a in apps]}
 
 
@@ -736,14 +798,14 @@ async def update_application_status(
 
 @app.get("/api/applications/{app_id}")
 async def application_detail(app_id: str, user: dict = Depends(require_user)):
-    apps = _db().get_applications(user_id=user["id"])
-    match = next(
-        (a for a in apps if a.id == app_id or app_id.lower() in a.company.lower()),
-        None,
-    )
-    if not match:
+    apps = _db().get_applications(user_id=user["id"], app_id=app_id)
+    if not apps:
+        # Fallback: company name search (legacy behaviour)
+        all_apps = _db().get_applications(user_id=user["id"])
+        apps = [a for a in all_apps if app_id.lower() in a.company.lower()]
+    if not apps:
         raise HTTPException(404, "Application not found")
-    return match.model_dump(mode="json")
+    return apps[0].model_dump(mode="json")
 
 
 @app.get("/api/events")
@@ -757,7 +819,8 @@ async def events(request: Request):
             new = STATE.unseen()
             for evt in new:
                 yield {"event": "update", "data": json.dumps(evt)}
-            await asyncio.sleep(1)
+            # Poll fast during active search, slow otherwise to save resources
+            await asyncio.sleep(0.5 if STATE.running else 5)
 
     return EventSourceResponse(publisher())
 

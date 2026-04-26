@@ -158,19 +158,27 @@ def list_models(provider: str, api_key: str) -> list[dict]:
         return out
 
     if p == "gemini":
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
+        import requests
+        r = requests.get(
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            params={"key": api_key},
+            timeout=12,
+        )
+        r.raise_for_status()
         models = []
-        for m in genai.list_models():
-            if "generateContent" in (m.supported_generation_methods or []):
-                mid = m.name.replace("models/", "")
-                rec = mid in {"gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"}
-                models.append((mid, m.display_name or mid, rec))
+        for m in r.json().get("models", []):
+            methods = m.get("supportedGenerationMethods") or []
+            if "generateContent" not in methods:
+                continue
+            mid = m.get("name", "").replace("models/", "")
+            display = m.get("displayName", mid)
+            rec = mid in {"gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"}
+            models.append((mid, display, rec))
         return _wrap(models)
 
     if p == "openai":
         from openai import OpenAI
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key, timeout=12)
         models = []
         for m in client.models.list().data:
             if "gpt" in m.id.lower():
@@ -201,7 +209,7 @@ def list_models(provider: str, api_key: str) -> list[dict]:
 
     if p == "grok":
         from openai import OpenAI
-        client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
+        client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1", timeout=12)
         models = []
         for m in client.models.list().data:
             mid = m.id

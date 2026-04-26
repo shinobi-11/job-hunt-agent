@@ -661,8 +661,11 @@ function loadAuthState() {
   if (!user) { location.href = "/login"; return; }
   // Avatar already set server-side via template — nothing to do
 }
-$("#btnLogout").onclick = () => {
-  fetch(`${API}/api/auth/logout`, { method: "POST" }).catch(() => {});
+$("#btnLogout").onclick = async () => {
+  // Must await — cookie is httponly so only the server's Set-Cookie response
+  // header can clear it. Navigating before the response arrives leaves the
+  // cookie intact and the user stays "logged in".
+  try { await fetch(`${API}/api/auth/logout`, { method: "POST" }); } catch {}
   location.href = "/";
 };
 

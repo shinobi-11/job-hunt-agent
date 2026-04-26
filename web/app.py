@@ -61,6 +61,10 @@ if _SENTRY_DSN:
         print(f"Sentry init failed (non-fatal): {e}")
 
 app = FastAPI(title="Job Hunt Agent", version="0.2.0")
+
+from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Django collected static files (mounted at startup if collectstatic ran)
@@ -112,7 +116,12 @@ def _mount_django_admin() -> None:
         # Re-mount static if collectstatic just produced the directory
         try:
             _DS = ROOT.parent / "admin_site" / "staticfiles"
-            if _DS.exists() and not any(r.path == "/django/static" for r in app.routes):
+            _already = any(
+                getattr(r, "name", None) == "django-static" or
+                getattr(r, "path", "").rstrip("/") == "/django/static"
+                for r in app.routes
+            )
+            if _DS.exists() and not _already:
                 app.mount("/django/static", StaticFiles(directory=str(_DS)), name="django-static")
         except Exception as e:
             print(f"Django static re-mount failed (non-fatal): {e}")

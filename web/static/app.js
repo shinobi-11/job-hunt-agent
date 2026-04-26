@@ -218,7 +218,7 @@ async function discoverModels() {
   $("#modelHint").textContent = "Querying provider for available models…";
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
+  const timer = setTimeout(() => controller.abort(), 13000);
   try {
     const r = await fetch(`${API}/api/llm/models`, {
       method: "POST",

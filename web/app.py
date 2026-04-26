@@ -426,9 +426,8 @@ class ListModelsPayload(BaseModel):
 
 @app.post("/api/llm/models")
 async def discover_models(payload: ListModelsPayload, user: dict = Depends(require_user)):
-    """Given a provider + API key, list models the key can access. 15s timeout."""
-    import asyncio
-    from llm_providers import list_models, PROVIDERS
+    """Given a provider + API key, list models the key can access."""
+    from llm_providers import list_models_async, PROVIDERS
 
     if payload.provider not in PROVIDERS:
         raise HTTPException(400, f"Unknown provider: {payload.provider}")
@@ -442,14 +441,10 @@ async def discover_models(payload: ListModelsPayload, user: dict = Depends(requi
         raise HTTPException(400, "Provide an API key (or save one to your profile first)")
 
     try:
-        # Run sync list_models in a thread, timeout after 15s
-        models = await asyncio.wait_for(
-            asyncio.to_thread(list_models, payload.provider, key),
-            timeout=15.0,
-        )
+        models = await asyncio.wait_for(list_models_async(payload.provider, key), timeout=12.0)
         return {"models": models, "default": PROVIDERS[payload.provider]["default_model"]}
     except asyncio.TimeoutError:
-        raise HTTPException(504, f"Provider didn't respond in 15s — key may be invalid or expired. Try again or use the default model.")
+        raise HTTPException(504, "Provider didn't respond in 12s — key may be invalid. Try again or use the default model.")
     except Exception as e:
         msg = str(e)
         if "expired" in msg.lower() or "invalid" in msg.lower() or "API_KEY_INVALID" in msg:

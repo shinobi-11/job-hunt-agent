@@ -286,31 +286,39 @@ function paintProfile(profile) {
   `;
 }
 
+let _profileFetching = false;
+
 async function renderProfile() {
-  // Paint cached value immediately to avoid flicker
+  // If we have a cache, paint it immediately and DO NOT re-fetch unless cache is stale (>30s)
+  const view = $("#profileView");
+  if (!view) return;
+
   if (profileCache !== null) {
     paintProfile(profileCache);
-  } else {
-    const view = $("#profileView");
-    if (view && !view.dataset.painted) {
-      view.innerHTML = `
-        <div class="lg-shimmer" style="height:280px;border-radius:12px;background:rgba(255,255,255,0.3)"></div>
-      `;
-    }
+    // Only revalidate if last fetch was more than 30s ago AND nothing else is fetching
+    const stale = !view.dataset.lastFetch || (Date.now() - parseInt(view.dataset.lastFetch)) > 30000;
+    if (!stale || _profileFetching) return;
+  } else if (!view.dataset.painted) {
+    view.innerHTML = `<div class="lg-shimmer" style="height:280px;border-radius:12px;background:rgba(255,255,255,0.3)"></div>`;
   }
-  // Fetch fresh value silently and only re-paint if it actually changed
+
+  if (_profileFetching) return;
+  _profileFetching = true;
+
   try {
     const r = await fetch(`${API}/api/profile`);
     const { profile } = await r.json();
-    const fresh = JSON.stringify(profile);
-    if (JSON.stringify(profileCache) !== fresh) {
+    const freshStr = JSON.stringify(profile);
+    if (JSON.stringify(profileCache) !== freshStr) {
       profileCache = profile;
       paintProfile(profile);
-      const view = $("#profileView");
-      if (view) view.dataset.painted = "1";
     }
+    view.dataset.painted = "1";
+    view.dataset.lastFetch = String(Date.now());
   } catch (e) {
     console.error("renderProfile failed:", e);
+  } finally {
+    _profileFetching = false;
   }
 }
 
@@ -443,12 +451,22 @@ $("#resumeForm").onsubmit = async (e) => {
 
     // Apply AI-suggested profile fields if returned
     if (info.suggested_profile) {
+      // First switch to settings, fill form, then re-paint
+      activatePanel("settings");
+      // Wait one tick for the panel to be visible before filling
+      await new Promise(r => setTimeout(r, 50));
       applySuggestedProfile(info.suggested_profile);
-      toast("✨ Profile fields auto-filled from your resume — review and save", "success");
+      toast("✨ Profile fields auto-filled from resume — review and click Save", "success");
+    } else if (info.autofill_status === "no_api_key") {
+      toast("Resume uploaded. Add an LLM API key in Settings to auto-fill the form next time", "warning");
+      fillSettingsForm();
+    } else if (info.autofill_status === "ai_timeout") {
+      toast("Resume uploaded but AI autofill timed out — fill the form manually", "warning");
+      fillSettingsForm();
     } else {
-      toast("Add an LLM API key in Settings to auto-fill profile from resume", "warning");
+      toast(`Resume uploaded. AI autofill: ${info.autofill_status || "skipped"}`, "warning");
+      fillSettingsForm();
     }
-    fillSettingsForm();
   } finally {
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "📄 Upload Resume"; }
   }
@@ -456,19 +474,30 @@ $("#resumeForm").onsubmit = async (e) => {
 
 function applySuggestedProfile(s) {
   const f = $("#profileForm");
-  if (!f) return;
-  // Only fill empty fields — don't overwrite user-edited values
-  if (s.name && !f.name.value) f.name.value = s.name;
-  if (s.email && !f.email.value) f.email.value = s.email;
-  if (s.current_role && !f.current_role.value) f.current_role.value = s.current_role;
-  if (s.years_experience && !f.years_experience.value) f.years_experience.value = s.years_experience;
-  if (s.desired_roles?.length && !f.desired_roles.value) f.desired_roles.value = s.desired_roles.join(", ");
-  if (s.preferred_locations?.length && !f.preferred_locations.value) f.preferred_locations.value = s.preferred_locations.join(", ");
-  if (s.skills?.length && !f.skills.value) f.skills.value = s.skills.join(", ");
-  if (s.remote_preference && f.remote_preference.value === "any") f.remote_preference.value = s.remote_preference;
-  // Switch to Settings tab so user sees the populated form
-  activatePanel("settings");
-  // Scroll to form
+  if (!f) {
+    console.warn("Profile form not found; cannot apply suggested values");
+    return;
+  }
+  let filled = 0;
+  const setIfEmpty = (name, value) => {
+    if (!f[name]) return;
+    if (value && !f[name].value) {
+      f[name].value = value;
+      filled++;
+    }
+  };
+  setIfEmpty("name", s.name);
+  setIfEmpty("email", s.email);
+  setIfEmpty("current_role", s.current_role);
+  setIfEmpty("years_experience", s.years_experience);
+  setIfEmpty("desired_roles", (s.desired_roles || []).join(", "));
+  setIfEmpty("preferred_locations", (s.preferred_locations || []).join(", "));
+  setIfEmpty("skills", (s.skills || []).join(", "));
+  if (s.remote_preference && f.remote_preference?.value === "any") {
+    f.remote_preference.value = s.remote_preference;
+    filled++;
+  }
+  console.log(`applySuggestedProfile: filled ${filled} field(s)`);
   $("#profileForm")?.scrollIntoView({behavior: "smooth", block: "start"});
 }
 

@@ -414,7 +414,8 @@ class ListModelsPayload(BaseModel):
 
 @app.post("/api/llm/models")
 async def discover_models(payload: ListModelsPayload, user: dict = Depends(require_user)):
-    """Given a provider + API key, list models the key can access."""
+    """Given a provider + API key, list models the key can access. 15s timeout."""
+    import asyncio
     from llm_providers import list_models, PROVIDERS
 
     if payload.provider not in PROVIDERS:
@@ -429,10 +430,21 @@ async def discover_models(payload: ListModelsPayload, user: dict = Depends(requi
         raise HTTPException(400, "Provide an API key (or save one to your profile first)")
 
     try:
-        models = list_models(payload.provider, key)
+        # Run sync list_models in a thread, timeout after 15s
+        models = await asyncio.wait_for(
+            asyncio.to_thread(list_models, payload.provider, key),
+            timeout=15.0,
+        )
         return {"models": models, "default": PROVIDERS[payload.provider]["default_model"]}
+    except asyncio.TimeoutError:
+        raise HTTPException(504, f"Provider didn't respond in 15s — key may be invalid or expired. Try again or use the default model.")
     except Exception as e:
-        raise HTTPException(400, f"Could not list models: {str(e)[:200]}")
+        msg = str(e)
+        if "expired" in msg.lower() or "invalid" in msg.lower() or "API_KEY_INVALID" in msg:
+            raise HTTPException(401, "API key expired or invalid. Please paste a fresh key.")
+        if "quota" in msg.lower() or "429" in msg:
+            raise HTTPException(429, "API quota exceeded for this key.")
+        raise HTTPException(400, f"Could not list models: {msg[:200]}")
 
 
 @app.get("/api/providers")
@@ -515,20 +527,28 @@ async def upload_resume(file: UploadFile = File(...), user: dict = Depends(requi
 
     # Try AI-powered profile autofill if user has an LLM key configured
     suggested = None
+    autofill_status = "no_api_key"
     existing = _db().get_profile(user_id=user["id"])
-    if existing and existing.llm_api_key:
+
+    # Fall back to env GEMINI_API_KEY for the resume autofill if user hasn't set one yet
+    api_key = (existing.llm_api_key if existing else None) or os.environ.get("GEMINI_API_KEY", "")
+    provider = (existing.llm_provider if existing else None) or "gemini"
+    model = existing.llm_model if existing else None
+
+    if api_key and len(api_key) >= 20:
         try:
+            import asyncio
             from profile_builder import ProfileBuilder
-            builder = ProfileBuilder(
-                api_key=existing.llm_api_key,
-                provider=existing.llm_provider or "gemini",
-                model_name=existing.llm_model,
-            )
-            built = builder.build_from_resume(text)
+
+            def _build():
+                builder = ProfileBuilder(api_key=api_key, provider=provider, model_name=model)
+                return builder.build_from_resume(text)
+
+            built = await asyncio.wait_for(asyncio.to_thread(_build), timeout=30.0)
             if built:
                 suggested = {
                     "name": built.name,
-                    "email": built.email if "@" in built.email and "firebase.local" not in built.email else existing.email,
+                    "email": built.email if "@" in built.email and "firebase.local" not in built.email else (existing.email if existing else None),
                     "current_role": built.current_role,
                     "years_experience": built.years_experience,
                     "desired_roles": built.desired_roles,
@@ -538,7 +558,14 @@ async def upload_resume(file: UploadFile = File(...), user: dict = Depends(requi
                     "remote_preference": built.remote_preference,
                     "company_size_preference": built.company_size_preference,
                 }
+                autofill_status = "ok"
+            else:
+                autofill_status = "ai_returned_nothing"
+        except asyncio.TimeoutError:
+            autofill_status = "ai_timeout"
+            print("AI autofill timed out after 30s")
         except Exception as e:
+            autofill_status = f"ai_error: {str(e)[:100]}"
             print(f"AI autofill failed (non-fatal): {e}")
 
     return {
@@ -547,6 +574,7 @@ async def upload_resume(file: UploadFile = File(...), user: dict = Depends(requi
         "size_bytes": len(contents),
         "chars": len(text),
         "suggested_profile": suggested,
+        "autofill_status": autofill_status,
     }
 
 

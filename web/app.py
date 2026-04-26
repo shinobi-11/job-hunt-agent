@@ -61,19 +61,6 @@ if _SENTRY_DSN:
         print(f"Sentry init failed (non-fatal): {e}")
 
 app = FastAPI(title="Job Hunt Agent", version="0.2.0")
-
-# Static files with long-lived cache headers (1 week)
-# Versioning via ?v= query param busts the cache on deploy
-from starlette.middleware.base import BaseHTTPMiddleware
-
-class StaticCacheMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        response = await call_next(request)
-        if request.url.path.startswith("/static/"):
-            response.headers["Cache-Control"] = "public, max-age=604800, immutable"
-        return response
-
-app.add_middleware(StaticCacheMiddleware)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Django collected static files (mounted at startup if collectstatic ran)
@@ -155,8 +142,7 @@ def _mount_django_admin() -> None:
         print(f"Django mount failed (non-fatal): {e}")
 
 
-# Run in background so the server starts accepting requests immediately
-threading.Thread(target=_mount_django_admin, daemon=True).start()
+_mount_django_admin()
 
 
 # ─── Firebase Admin (optional — verifies Google/Phone ID tokens) ──────

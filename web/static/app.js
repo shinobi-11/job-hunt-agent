@@ -671,8 +671,8 @@ async function loadAuthState() {
     if (av) av.textContent = (user.name || user.email)[0].toUpperCase();
   } catch (e) { console.error("Auth check failed", e); }
 }
-$("#btnLogout").onclick = async () => {
-  await fetch(`${API}/api/auth/logout`, { method: "POST" });
+$("#btnLogout").onclick = () => {
+  fetch(`${API}/api/auth/logout`, { method: "POST" }).catch(() => {});
   location.href = "/";
 };
 

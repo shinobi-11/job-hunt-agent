@@ -66,3 +66,8 @@ firebase-admin.json
 
 # Memory log (local only)
 .shinobi_mem
+
+# Test coverage
+.coverage
+coverage.xml
+htmlcov/

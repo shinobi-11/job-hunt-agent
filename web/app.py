@@ -513,11 +513,40 @@ async def upload_resume(file: UploadFile = File(...), user: dict = Depends(requi
         dest.unlink(missing_ok=True)
         raise HTTPException(400, "Resume parsed but text content is too short — possibly an image-only PDF. Try a text-based PDF/DOCX.")
 
+    # Try AI-powered profile autofill if user has an LLM key configured
+    suggested = None
+    existing = _db().get_profile(user_id=user["id"])
+    if existing and existing.llm_api_key:
+        try:
+            from profile_builder import ProfileBuilder
+            builder = ProfileBuilder(
+                api_key=existing.llm_api_key,
+                provider=existing.llm_provider or "gemini",
+                model_name=existing.llm_model,
+            )
+            built = builder.build_from_resume(text)
+            if built:
+                suggested = {
+                    "name": built.name,
+                    "email": built.email if "@" in built.email and "firebase.local" not in built.email else existing.email,
+                    "current_role": built.current_role,
+                    "years_experience": built.years_experience,
+                    "desired_roles": built.desired_roles,
+                    "skills": built.skills,
+                    "industries": built.industries,
+                    "preferred_locations": built.preferred_locations,
+                    "remote_preference": built.remote_preference,
+                    "company_size_preference": built.company_size_preference,
+                }
+        except Exception as e:
+            print(f"AI autofill failed (non-fatal): {e}")
+
     return {
         "ok": True,
         "filename": file.filename,
         "size_bytes": len(contents),
         "chars": len(text),
+        "suggested_profile": suggested,
     }
 
 

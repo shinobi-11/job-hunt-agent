@@ -250,10 +250,11 @@ document.addEventListener("click", e => {
 });
 
 // ─── Profile view ───
-async function renderProfile() {
-  const r = await fetch(`${API}/api/profile`);
-  const { profile } = await r.json();
+let profileCache = null;
+
+function paintProfile(profile) {
   const view = $("#profileView");
+  if (!view) return;
   if (!profile) {
     view.innerHTML = `<p style="color:var(--lg-text-dim)">No profile yet. Open Settings to create one.</p>`;
     return;
@@ -283,6 +284,34 @@ async function renderProfile() {
       ${rows.map(([k, v]) => `<tr><td style="color:var(--lg-text-dim);width:38%">${k}</td><td style="font-weight:600">${escapeHtml(v)}</td></tr>`).join("")}
     </table>
   `;
+}
+
+async function renderProfile() {
+  // Paint cached value immediately to avoid flicker
+  if (profileCache !== null) {
+    paintProfile(profileCache);
+  } else {
+    const view = $("#profileView");
+    if (view && !view.dataset.painted) {
+      view.innerHTML = `
+        <div class="lg-shimmer" style="height:280px;border-radius:12px;background:rgba(255,255,255,0.3)"></div>
+      `;
+    }
+  }
+  // Fetch fresh value silently and only re-paint if it actually changed
+  try {
+    const r = await fetch(`${API}/api/profile`);
+    const { profile } = await r.json();
+    const fresh = JSON.stringify(profile);
+    if (JSON.stringify(profileCache) !== fresh) {
+      profileCache = profile;
+      paintProfile(profile);
+      const view = $("#profileView");
+      if (view) view.dataset.painted = "1";
+    }
+  } catch (e) {
+    console.error("renderProfile failed:", e);
+  }
 }
 
 // ─── Settings form ───
@@ -387,23 +416,61 @@ $("#profileForm").onsubmit = async (e) => {
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(payload),
   });
-  if (r.ok) { toast("Profile saved"); renderProfile(); }
-  else { toast("Save failed", "error"); }
+  if (r.ok) {
+    toast("Profile saved");
+    profileCache = null;  // invalidate cache so re-render shows the saved data
+    renderProfile();
+  } else {
+    toast("Save failed", "error");
+  }
 };
 
 $("#resumeForm").onsubmit = async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
-  const r = await fetch(`${API}/api/resume`, { method: "POST", body: fd });
-  if (r.ok) {
+  const submitBtn = e.target.querySelector("button[type='submit']");
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Uploading…"; }
+
+  try {
+    const r = await fetch(`${API}/api/resume`, { method: "POST", body: fd });
+    if (!r.ok) {
+      const err = await r.json();
+      toast(err.detail || "Upload failed", "error");
+      return;
+    }
     const info = await r.json();
     toast(`Resume uploaded (${info.chars} chars)`);
+
+    // Apply AI-suggested profile fields if returned
+    if (info.suggested_profile) {
+      applySuggestedProfile(info.suggested_profile);
+      toast("✨ Profile fields auto-filled from your resume — review and save", "success");
+    } else {
+      toast("Add an LLM API key in Settings to auto-fill profile from resume", "warning");
+    }
     fillSettingsForm();
-  } else {
-    const err = await r.json();
-    toast(err.detail || "Upload failed", "error");
+  } finally {
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "📄 Upload Resume"; }
   }
 };
+
+function applySuggestedProfile(s) {
+  const f = $("#profileForm");
+  if (!f) return;
+  // Only fill empty fields — don't overwrite user-edited values
+  if (s.name && !f.name.value) f.name.value = s.name;
+  if (s.email && !f.email.value) f.email.value = s.email;
+  if (s.current_role && !f.current_role.value) f.current_role.value = s.current_role;
+  if (s.years_experience && !f.years_experience.value) f.years_experience.value = s.years_experience;
+  if (s.desired_roles?.length && !f.desired_roles.value) f.desired_roles.value = s.desired_roles.join(", ");
+  if (s.preferred_locations?.length && !f.preferred_locations.value) f.preferred_locations.value = s.preferred_locations.join(", ");
+  if (s.skills?.length && !f.skills.value) f.skills.value = s.skills.join(", ");
+  if (s.remote_preference && f.remote_preference.value === "any") f.remote_preference.value = s.remote_preference;
+  // Switch to Settings tab so user sees the populated form
+  activatePanel("settings");
+  // Scroll to form
+  $("#profileForm")?.scrollIntoView({behavior: "smooth", block: "start"});
+}
 
 // ─── Applications ───
 async function renderApplications(status = null) {

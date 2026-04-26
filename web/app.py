@@ -530,8 +530,9 @@ async def upload_resume(file: UploadFile = File(...), user: dict = Depends(requi
     autofill_status = "no_api_key"
     existing = _db().get_profile(user_id=user["id"])
 
-    # Fall back to env GEMINI_API_KEY for the resume autofill if user hasn't set one yet
-    api_key = (existing.llm_api_key if existing else None) or os.environ.get("GEMINI_API_KEY", "")
+    # Use the user's saved key. Don't fall back to env — that key is shared and
+    # may be expired/quota-exhausted, masking the real "no key" state.
+    api_key = existing.llm_api_key if existing else None
     provider = (existing.llm_provider if existing else None) or "gemini"
     model = existing.llm_model if existing else None
 

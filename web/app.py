@@ -428,6 +428,12 @@ class ProfilePayload(BaseModel):
     llm_model: str | None = None
 
 
+class ProviderPayload(BaseModel):
+    llm_provider: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str | None = None
+
+
 class ListModelsPayload(BaseModel):
     provider: str
     api_key: str | None = None  # if not given, use the saved key
@@ -486,6 +492,23 @@ async def save_profile(payload: ProfilePayload, user: dict = Depends(require_use
     return {"ok": True, "profile": _mask_key(profile.model_dump(mode="json"))}
 
 
+@app.patch("/api/settings/provider")
+async def save_provider_settings(payload: ProviderPayload, user: dict = Depends(require_user)):
+    """Save only the LLM provider / key / model without touching profile details."""
+    existing = _db().get_profile(user_id=user["id"])
+    data = existing.model_dump() if existing else {}
+    if payload.llm_provider:
+        data["llm_provider"] = payload.llm_provider
+    if payload.llm_model is not None:
+        data["llm_model"] = payload.llm_model or None
+    if payload.llm_api_key and payload.llm_api_key not in ("●●●●●●●●", ""):
+        data["llm_api_key"] = payload.llm_api_key
+    profile = UserProfile(**data)
+    _db().save_profile(profile, user_id=user["id"])
+    masked = _mask_key({"llm_api_key": profile.llm_api_key})["llm_api_key"]
+    return {"ok": True, "masked_key": masked}
+
+
 def _mask_key(payload: dict) -> dict:
     """Never return the full API key to the client after it's saved."""
     if payload.get("llm_api_key"):
@@ -539,57 +562,15 @@ async def upload_resume(file: UploadFile = File(...), user: dict = Depends(requi
         dest.unlink(missing_ok=True)
         raise HTTPException(400, "Resume parsed but text content is too short — possibly an image-only PDF. Try a text-based PDF/DOCX.")
 
-    # Try AI-powered profile autofill if user has an LLM key configured
-    suggested = None
-    autofill_status = "no_api_key"
     existing = _db().get_profile(user_id=user["id"])
-
-    # Use the user's saved key. Don't fall back to env — that key is shared and
-    # may be expired/quota-exhausted, masking the real "no key" state.
-    api_key = existing.llm_api_key if existing else None
-    provider = (existing.llm_provider if existing else None) or "gemini"
-    model = existing.llm_model if existing else None
-
-    if api_key and len(api_key) >= 20:
-        try:
-            import asyncio
-            from profile_builder import ProfileBuilder
-
-            def _build():
-                builder = ProfileBuilder(api_key=api_key, provider=provider, model_name=model)
-                return builder.build_from_resume(text)
-
-            built = await asyncio.wait_for(asyncio.to_thread(_build), timeout=30.0)
-            if built:
-                suggested = {
-                    "name": built.name,
-                    "email": built.email if "@" in built.email and "firebase.local" not in built.email else (existing.email if existing else None),
-                    "current_role": built.current_role,
-                    "years_experience": built.years_experience,
-                    "desired_roles": built.desired_roles,
-                    "skills": built.skills,
-                    "industries": built.industries,
-                    "preferred_locations": built.preferred_locations,
-                    "remote_preference": built.remote_preference,
-                    "company_size_preference": built.company_size_preference,
-                }
-                autofill_status = "ok"
-            else:
-                autofill_status = "ai_returned_nothing"
-        except asyncio.TimeoutError:
-            autofill_status = "ai_timeout"
-            print("AI autofill timed out after 30s")
-        except Exception as e:
-            autofill_status = f"ai_error: {str(e)[:100]}"
-            print(f"AI autofill failed (non-fatal): {e}")
+    has_api_key = bool(existing and existing.llm_api_key and len(existing.llm_api_key) >= 20)
 
     return {
         "ok": True,
         "filename": file.filename,
         "size_bytes": len(contents),
         "chars": len(text),
-        "suggested_profile": suggested,
-        "autofill_status": autofill_status,
+        "has_api_key": has_api_key,
     }
 
 

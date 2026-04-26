@@ -343,7 +343,10 @@ async function fillSettingsForm() {
   const r = await fetch(`${API}/api/profile`);
   const { profile } = await r.json();
   const form = $("#profileForm");
+  const apiForm = $("#apiForm");
   if (!profile) { updateProviderHint(); return; }
+
+  // Profile detail fields (associated via form="profileForm")
   form.name.value = profile.name || "";
   form.email.value = profile.email || "";
   form.current_role.value = profile.current_role || "";
@@ -359,28 +362,31 @@ async function fillSettingsForm() {
   form.willing_to_relocate.checked = !!profile.willing_to_relocate;
   form.auto_apply_enabled.checked = profile.auto_apply_enabled !== false;
   form.strict_salary_filter.checked = profile.strict_salary_filter !== false;
-  if (form.llm_provider) form.llm_provider.value = profile.llm_provider || "gemini";
-  if (form.llm_api_key) {
-    form.llm_api_key.value = "";
-    form.llm_api_key.placeholder = profile.llm_api_key
-      ? `Saved: ${profile.llm_api_key} (paste new to replace)`
-      : (PROVIDERS[profile.llm_provider]?.key_hint || "Paste your key");
-  }
-  // Show currently-saved model in dropdown
-  if (form.llm_model) {
-    const sel = $("#llmModelSelect");
-    if (profile.llm_model) {
-      // Inject the saved model as an option even if user hasn't discovered yet
-      const exists = [...sel.options].some(o => o.value === profile.llm_model);
-      if (!exists) {
-        const opt = document.createElement("option");
-        opt.value = profile.llm_model;
-        opt.textContent = `${profile.llm_model} (saved)`;
-        sel.appendChild(opt);
+
+  // AI Provider fields (in apiForm — separate form, separate save)
+  if (apiForm) {
+    if (apiForm.llm_provider) apiForm.llm_provider.value = profile.llm_provider || "gemini";
+    if (apiForm.llm_api_key) {
+      apiForm.llm_api_key.value = "";
+      apiForm.llm_api_key.placeholder = profile.llm_api_key
+        ? `Saved: ${profile.llm_api_key} (paste new to replace)`
+        : (PROVIDERS[profile.llm_provider]?.key_hint || "Paste your key");
+    }
+    if (apiForm.llm_model) {
+      const sel = $("#llmModelSelect");
+      if (profile.llm_model) {
+        const exists = [...sel.options].some(o => o.value === profile.llm_model);
+        if (!exists) {
+          const opt = document.createElement("option");
+          opt.value = profile.llm_model;
+          opt.textContent = `${profile.llm_model} (saved)`;
+          sel.appendChild(opt);
+        }
+        sel.value = profile.llm_model;
       }
-      sel.value = profile.llm_model;
     }
   }
+
   updateProviderHint();
   updateSalaryPreview();
 
@@ -412,9 +418,59 @@ document.addEventListener("input", e => {
   }
 });
 
+// ─── AI Provider save (independent of profile details) ───
+$("#apiForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const payload = {
+    llm_provider: f.llm_provider?.value || "gemini",
+    llm_api_key: f.llm_api_key?.value || null,
+    llm_model: f.llm_model?.value || null,
+  };
+  const btn = e.target.querySelector("button[type='submit']");
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+  try {
+    const r = await fetch(`${API}/api/settings/provider`, {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    if (r.ok) {
+      toast("API settings saved");
+      profileCache = null;
+      renderProfile();
+      // If a key was entered and a resume exists, run autofill in background
+      if (payload.llm_api_key && payload.llm_api_key.length >= 4) {
+        const resumeRes = await fetch(`${API}/api/resume`);
+        const resumeInfo = await resumeRes.json();
+        if (resumeInfo.exists) {
+          const status = $("#autofillStatus");
+          const aBtn = $("#reAutofillBtn");
+          if (status) status.textContent = "Running AI autofill…";
+          if (aBtn) { aBtn.disabled = true; aBtn.textContent = "Autofilling…"; }
+          toast("API key saved — running resume autofill…");
+          triggerAutofill().finally(() => {
+            if (status) status.textContent = "";
+            if (aBtn) { aBtn.disabled = false; aBtn.textContent = "✨ Re-autofill from Resume"; }
+          });
+        }
+      }
+      // Refresh placeholder to show masked key
+      await fillSettingsForm();
+    } else {
+      toast("Save failed", "error");
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "💾 Save API Settings"; }
+  }
+};
+
+// ─── Profile details save ───
 $("#profileForm").onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target;
+  // Read LLM fields from the separate apiForm (they're not in profileForm)
+  const apiForm = $("#apiForm");
   const payload = {
     name: f.name.value,
     email: f.email.value,
@@ -431,9 +487,10 @@ $("#profileForm").onsubmit = async (e) => {
     willing_to_relocate: f.willing_to_relocate.checked,
     auto_apply_enabled: f.auto_apply_enabled.checked,
     strict_salary_filter: f.strict_salary_filter.checked,
-    llm_provider: f.llm_provider?.value || "gemini",
-    llm_api_key: f.llm_api_key?.value || null,
-    llm_model: f.llm_model?.value || null,
+    // Include current LLM settings so profile save doesn't overwrite them with defaults
+    llm_provider: apiForm?.llm_provider?.value || "gemini",
+    llm_api_key: apiForm?.llm_api_key?.value || null,
+    llm_model: apiForm?.llm_model?.value || null,
   };
   const r = await fetch(`${API}/api/profile`, {
     method: "POST",
@@ -444,17 +501,6 @@ $("#profileForm").onsubmit = async (e) => {
     toast("Profile saved");
     profileCache = null;
     renderProfile();
-
-    // If user just saved an API key and has a resume, auto-run autofill
-    const hadKey = !!(payload.llm_api_key && payload.llm_api_key.length >= 4);
-    if (hadKey) {
-      const resumeRes = await fetch(`${API}/api/resume`);
-      const resumeInfo = await resumeRes.json();
-      if (resumeInfo.exists) {
-        toast("API key saved — running resume autofill…", "success");
-        await triggerAutofill();
-      }
-    }
   } else {
     toast("Save failed", "error");
   }
@@ -474,27 +520,21 @@ $("#resumeForm").onsubmit = async (e) => {
       return;
     }
     const info = await r.json();
-    toast(`Resume uploaded (${info.chars} chars)`);
+    toast(`Resume uploaded — ${info.chars} chars extracted`);
+    await fillSettingsForm();
 
-    // Apply AI-suggested profile fields if returned
-    if (info.suggested_profile) {
-      activatePanel("settings");
-      await new Promise(resolve => setTimeout(resolve, 80));
-      await fillSettingsForm();
-      applyAllSuggestedProfile(info.suggested_profile);
-      toast("✨ Profile autofilled from resume — review and click Save", "success");
-    } else if (info.autofill_status === "no_api_key") {
-      toast("Resume saved. Add your AI API key below then click Save — autofill will run automatically.", "warning");
-      activatePanel("settings");
-      await fillSettingsForm();
-    } else if (info.autofill_status === "ai_timeout") {
-      toast("Resume uploaded — AI timed out. Click ✨ Autofill from Resume after saving your key.", "warning");
-      activatePanel("settings");
-      await fillSettingsForm();
+    if (info.has_api_key) {
+      // Run autofill in background — don't block the upload confirmation
+      const status = $("#autofillStatus");
+      const aBtn = $("#reAutofillBtn");
+      if (status) status.textContent = "Running AI autofill…";
+      if (aBtn) { aBtn.disabled = true; aBtn.textContent = "Autofilling…"; }
+      triggerAutofill().finally(() => {
+        if (status) status.textContent = "";
+        if (aBtn) { aBtn.disabled = false; aBtn.textContent = "✨ Re-autofill from Resume"; }
+      });
     } else {
-      toast(`Resume saved. Status: ${info.autofill_status || "skipped"}`, "warning");
-      activatePanel("settings");
-      await fillSettingsForm();
+      toast("Save your AI API key above — autofill will run automatically.", "warning");
     }
   } finally {
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "📄 Upload Resume"; }

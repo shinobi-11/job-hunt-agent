@@ -211,7 +211,7 @@
           </div>
           <p style="margin:0 0 18px;color:var(--lg-text-dim);font-size:13px">Pick any LLM provider — switch keys anytime to dodge rate limits.</p>
 
-          <form id="profileForm" style="display:contents">
+          <form id="apiForm">
             <div class="lg-grid cols-2">
               <div>
                 <label class="lg-label">Provider</label>
@@ -241,10 +241,16 @@
               </p>
             </div>
             <p id="providerHint" style="margin-top:8px;font-size:12px;color:var(--lg-text-dim)"></p>
+
+            <div style="display:flex;justify-content:flex-end;margin-top:16px">
+              <button type="submit" class="lg-btn primary">💾 Save API Settings</button>
+            </div>
           </form>
         </div>
 
         <!-- ③ Profile Details -->
+        <!-- Hidden form anchor — profile detail inputs below reference this via form="profileForm" -->
+        <form id="profileForm" style="display:none" aria-hidden="true"></form>
         <div class="lg-card lg-glow" style="padding:28px">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
             <span style="font-size:22px">👤</span>

@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import threading
+import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -22,6 +24,14 @@ EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 
 _serializer: Optional[URLSafeTimedSerializer] = None
 
+# In-memory user cache: uid → (user_dict, expiry_timestamp)
+_USER_CACHE: dict[str, tuple[dict, float]] = {}
+_USER_CACHE_TTL = 120  # seconds — avoid DB lookup on every authenticated request
+_USER_CACHE_LOCK = threading.Lock()
+
+# Cache postgres detection — never changes at runtime
+_POSTGRES: Optional[bool] = None
+
 
 def _secret() -> str:
     return os.environ.get("SESSION_SECRET") or "dev-only-secret-change-in-prod-please"
@@ -35,7 +45,10 @@ def _ser() -> URLSafeTimedSerializer:
 
 
 def _is_postgres() -> bool:
-    return bool(os.getenv("DATABASE_URL", "").startswith(("postgres://", "postgresql://")))
+    global _POSTGRES
+    if _POSTGRES is None:
+        _POSTGRES = bool(os.getenv("DATABASE_URL", "").startswith(("postgres://", "postgresql://")))
+    return _POSTGRES
 
 
 def _connect():
@@ -159,6 +172,12 @@ def find_user_by_email(email: str) -> Optional[dict]:
 
 
 def find_user_by_id(user_id: str) -> Optional[dict]:
+    now = time.monotonic()
+    with _USER_CACHE_LOCK:
+        cached = _USER_CACHE.get(user_id)
+        if cached and now < cached[1]:
+            return cached[0]
+
     ph = _placeholder()
     conn = _connect()
     try:
@@ -167,9 +186,19 @@ def find_user_by_id(user_id: str) -> Optional[dict]:
             f"SELECT id, email, name, created_at FROM users WHERE id = {ph}",
             (user_id,),
         )
-        return _row_to_dict(cur, cur.fetchone())
+        user = _row_to_dict(cur, cur.fetchone())
     finally:
         conn.close()
+
+    if user:
+        with _USER_CACHE_LOCK:
+            _USER_CACHE[user_id] = (user, now + _USER_CACHE_TTL)
+    return user
+
+
+def invalidate_user_cache(user_id: str) -> None:
+    with _USER_CACHE_LOCK:
+        _USER_CACHE.pop(user_id, None)
 
 
 def authenticate(email: str, password: str) -> Optional[dict]:

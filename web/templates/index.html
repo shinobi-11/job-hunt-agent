@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard · Job Hunt Agent</title>
-  <link rel="stylesheet" href="/static/liquid.css" />
+  <link rel="stylesheet" href="/static/liquid.css?v=20260426" />
 </head>
 <body class="lg-body">
 
@@ -58,7 +58,7 @@
         <button class="lg-icon-btn" title="Notifications">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         </button>
-        <div class="lg-avatar" id="userAvatar">U</div>
+        <div class="lg-avatar" id="userAvatar">{{ ((user.name or user.email or "U")[0] | upper) if user else "U" }}</div>
         <button class="lg-btn small" id="btnLogout">Log out</button>
       </div>
     </header>
@@ -317,6 +317,10 @@
     </section>
   </main>
 
-  <script src="/static/app.js"></script>
+  <script>
+    // User data injected server-side — no extra /api/auth/me round-trip needed
+    window.__USER__ = {{ {"id": user.id, "email": user.email, "name": user.name} | tojson if user else "null" }};
+  </script>
+  <script src="/static/app.js?v=20260426"></script>
 </body>
 </html>

@@ -662,14 +662,10 @@ $$(".sub-btn").forEach(btn => {
 });
 
 // ─── Auth ───
-async function loadAuthState() {
-  try {
-    const r = await fetch(`${API}/api/auth/me`);
-    const { user } = await r.json();
-    if (!user) { location.href = "/login"; return; }
-    const av = $("#userAvatar");
-    if (av) av.textContent = (user.name || user.email)[0].toUpperCase();
-  } catch (e) { console.error("Auth check failed", e); }
+function loadAuthState() {
+  const user = window.__USER__;
+  if (!user) { location.href = "/login"; return; }
+  // Avatar already set server-side via template — nothing to do
 }
 $("#btnLogout").onclick = () => {
   fetch(`${API}/api/auth/logout`, { method: "POST" }).catch(() => {});
